@@ -1,0 +1,66 @@
+# Node modules
+node_modules/
+
+# バッチファイル・ショートカット
+*.bat
+*.lnk
+
+# Python
+*.py
+
+# ローカルサーバー
+server.py
+vmc-receiver-server.js
+vmc-mocap-v2.js
+package.json
+package-lock.json
+package-vmc.json
+
+# APIキー・設定JSON（個人情報）
+vrm-ai-viewer-api-settings*.json
+multichar-api-keys*.json
+.env.example
+
+# バックアップ・不要HTML
+index_backup.html
+index_broken.html
+index元.html
+sbv2-test.html
+
+# メディア・デザインファイル
+*.mp4
+*.psd
+*.meta
+
+# ドキュメント（公開不要）
+VRM-AI-Viewer-System-Guide-Complete.md
+SETUP.md
+TROUBLESHOOTING.md
+REALTIME_GUIDE.md
+HYMOTION_INTEGRATION_GUIDE.md
+FEATURES_GUIDE.md
+QUICKSTART.md
+Grok-Voice-ExtendedTools-v4-ナレッジ.md
+今後やる改造.txt
+# 🧰 Grok Voice Extended Tools v4.0.txt
+
+# キャラクター設定JSON（個人設定）
+キャラクター個性*.json
+キャラクター全員分保存*.json
+モーキャプ設定*.json
+multichar-characters*.json
+５億年ボタン*.json
+
+# バックアップJS
+*元*.js
+*backup*.js
+imagination-wipe-v2.3-backup.js
+physics-system元.js
+Comfyui hy motion元１.js
+Comfyui hy motion2.js
+
+# ai-bbs（掲示板、公開不要なら）
+# ai-bbs/
+
+# fbxフォルダ
+fbx/

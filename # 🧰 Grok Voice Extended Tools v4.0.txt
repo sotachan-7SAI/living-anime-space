@@ -1,0 +1,299 @@
+# 🧰 Grok Voice Extended Tools v4.0 - 技術ナレッジ
+
+## 📌 概要
+
+A0098で実装し、A0101以降に引き継がれる**Grok Voice Function Calling拡張**。
+Grok Realtime API（OpenAI Realtime API互換のWebSocket）のFunction Calling機能を活用して、
+VRMキャラクターが**自分の意志で**以下の操作を会話中に実行できるようにしたシステム。
+
+- 服の着脱・テクスチャ操作
+- 体型モーフ・ボーンスケール調整
+- 120種以上のVRMAモーションから選択再生
+- 3Dオブジェクト生成（物理演算付き）
+- 物理演算パラメータ制御
+- AI 3Dモデル生成（Tripo3D連携）
+- 画像生成 → 想像ワイプ or フローティングウィンドウ表示
+
+**ポイント**: ユーザーが「踊って」と言えばGrokが自分でモーションを選んで踊り、
+「50cmの赤い球出して」と言えば実際にオブジェクトが生成される。
+Grok AIが自律的に判断してツールを呼び出す。
+
+---
+
+## 📁 関連ファイル構成
+
+```
+vrm-ai-viewer/
+├── grok-realtime-client.js    ★ V4.0に更新済み（ツール統合・Extended Tools連携）
+├── grok-extended-tools.js     ★ 新規作成（拡張ツール全6種の実装）
+├── vrm-body-control.js        既存V1.0（服着脱・ボーン・プリセット・4ツール）
+├── physics-system.js          既存（spawnPhysicsObject, spawnAIObject等）
+├── index.html                 ★ grok-extended-tools.jsのscriptタグ追加済み
+└── motions/
+    ├── motions.json           モーション一覧（120個以上）
+    └── *.vrma                 VRMAモーションファイル群
+```
+
+---
+
+## 🔧 ツール一覧（合計10個）
+
+### Body Control系（vrm-body-control.js → 4ツール）
+
+| ツール名 | 説明 | 主要引数 |
+|---------|------|---------|
+| `change_clothing` | 服パーツの着脱・透明度変更 | `target`(パーツ名/"clothing"), `opacity`(0-1) |
+| `change_body_shape` | ボーンスケール調整 | `bone_name`, `scale_x/y/z` |
+| `apply_body_preset` | 体型プリセット適用 | `preset_name`(chibi/bigHead/buff/alien等) |
+| `get_current_body_state` | 現在の服・ボーン状態取得 | なし |
+
+### Extended Tools系（grok-extended-tools.js → 6ツール）
+
+| ツール名 | 説明 | 主要引数 |
+|---------|------|---------|
+| `play_motion` | VRMAモーション選択再生 | `motion_name`/`category`/`keyword`, `loop` |
+| `spawn_object` | 物理オブジェクト生成 | `type`(sphere/box等), `size`(m), `color`, `count` |
+| `spawn_ai_object` | 自然言語オブジェクト生成 | `description`(日本語) |
+| `control_physics` | 物理演算制御 | `action`(set_gravity/clear_objects/toggle_fps), `gravity_y` |
+| `generate_3d_model` | Tripo3D AIモデル生成 | `prompt`(英語推奨) |
+| `generate_and_show_image` | 画像生成→表示 | `prompt`, `display_mode`(wipe/window) |
+
+---
+
+## 🔄 処理フロー
+
+### 全体アーキテクチャ
+
+```
+ユーザー音声/テキスト
+    ↓
+Grok Realtime API (WebSocket: wss://api.x.ai/v1/realtime)
+    ↓
+session.update で tools[] にツール定義を送信
+    ↓
+Grok AIが会話の文脈で判断
+    ↓ (Function Calling)
+response.function_call_arguments.done イベント
+    ↓
+grok-realtime-client.js :: executeFunctionCall()
+    ↓
+    ├── grokExtendedTools.handleFunctionCall() ← 優先
+    │   ├── play_motion → loadAndPlayVRMA()
+    │   ├── spawn_object → window.spawnPhysicsObject()
+    │   ├── spawn_ai_object → window.spawnAIObject()
+    │   ├── control_physics → physicsWorld操作
+    │   ├── generate_3d_model → Tripo3D連携
+    │   └── generate_and_show_image → Grok Aurora / DALL-E → UI表示
+    │
+    └── vrmBodyController.handleFunctionCall() ← フォールバック
+        ├── change_clothing → setMeshOpacity()
+        ├── change_body_shape → setBoneScale()
+        ├── apply_body_preset → applyBodyPreset()
+        └── get_current_body_state → getCurrentState()
+    ↓
+結果をJSON化してGrokに送信
+    ↓
+conversation.item.create (type: function_call_output)
+    ↓
+response.create → Grokが結果を踏まえた音声応答を生成
+```
+
+### ツール統合の仕組み
+
+```javascript
+// grok-realtime-client.js V4.0
+getAllTools() {
+    const bodyTools = this.getBodyControlTools();      // vrm-body-control.js から4個
+    const extTools = window.grokExtendedTools
+        ? window.grokExtendedTools.getToolDefinitions() // grok-extended-tools.js から6個
+        : [];
+    return [...bodyTools, ...extTools];                 // 合計10個
+}
+
+// executeFunctionCall() の優先順位
+// 1. grokExtendedTools.handleFunctionCall() → nullでなければ採用
+// 2. vrmBodyController.handleFunctionCall() → フォールバック
+// 3. どちらもnull → エラー返却
+// ★ Promise対応: generateImage等の非同期処理もawaitして結果を返す
+```
+
+### セッション設定（session.update）
+
+```javascript
+sendSessionConfig() {
+    const characterPrompt = localStorage.getItem('character_prompt');
+    const bodyControlContext = "...ボディコントロール説明...";
+    const extendedToolsContext = grokExtendedTools.getSystemPromptAddition();
+    // → モーション一覧、オブジェクト生成、物理演算、画像生成の説明を追加
+    
+    const fullPrompt = characterPrompt + bodyControlContext + extendedToolsContext + chatContext + bbsContext;
+    
+    ws.send({
+        type: 'session.update',
+        session: {
+            voice: this.voice,
+            instructions: fullPrompt,
+            tools: this.getAllTools(), // ★ 10個のツール定義
+            ...
+        }
+    });
+}
+```
+
+---
+
+## 🎭 モーションシステム詳細
+
+### カテゴリ分類（grok-extended-tools.js）
+
+モーション名のファイル名から自動分類:
+- **しゃべり**: "しゃべ" を含む
+- **セクシー**: "セクシー", "エロ", "投げキッス"
+- **喜び**: "喜び", "ガッツ", "ルンルン", "OK"
+- **怒り**: "怒り", "イライラ", "威嚇", "蹴", "ディス"
+- **悲しみ**: "悲し", "泣", "がっかり", "いじけ"
+- **驚き**: "びっくり", "びびり", "どんびき"
+- **ダンス**: "ダンス", "Kpop"
+- **攻撃**: "蹴り", "バク転", "側転"
+- **移動**: "あるき", "走り"
+- **リアクション**: "考える", "お辞儀", "祈る", "恥ずかし"
+
+### モーション再生の流れ
+
+```javascript
+executePlayMotion(args) {
+    // 1. motion_name直接指定 → 部分一致検索
+    // 2. category指定 → カテゴリ内からランダム選択
+    // 3. keyword指定 → 全モーションからキーワード検索
+    // 4. どれも見つからない → ランダム選択
+    
+    // VRMAをGLTFLoaderで読み込み → createVRMAnimationClip → mixer.clipAction.play()
+    loadAndPlayVRMA(path, loop);
+}
+```
+
+---
+
+## 🎨 画像生成・表示の詳細
+
+### 画像生成APIの優先順位
+
+1. **想像ワイプ** (`window.imaginationWipe.generateAndShow`) - 既存のGemini連携
+2. **Grok Aurora REST API** (`https://api.x.ai/v1/images/generations`, model: `grok-2-image`)
+3. **OpenAI DALL-E 3** (フォールバック)
+
+### 表示モード
+
+- **wipe**: 想像ワイプコンテナ（画面右下）に表示
+- **window**: ドラッグ可能なフローティングウィンドウで表示
+
+### API構造の制約
+
+Grok Realtime WebSocket API自体には画像生成機能がない。
+そのため**ブリッジ方式**を採用:
+1. Grok Realtime → Function Call `generate_and_show_image` を発行
+2. クライアントJS → Grok REST API（別リクエスト）で画像生成
+3. 生成画像をDOM操作で表示
+4. 結果をFunction Call結果としてGrokに返却
+
+つまり「Grok Voice AIが画像生成を依頼→クライアントが代行実行→結果をAIに報告」という流れ。
+Grok AIからすると「自分で画像を描いた」ように振る舞える。
+
+---
+
+## 📦 オブジェクト生成の詳細
+
+### spawn_object（パラメータ指定）
+
+既存の `window.spawnPhysicsObject()` を呼び出す。
+- 形状: sphere, box, cylinder, cone, torus, capsule, plane, icosahedron, octahedron, tetrahedron, torusKnot
+- サイズ: メートル単位（0.01〜10.0）
+- 色: 文字列→16進数変換（red→0xff0000等）
+- 個数: 1〜20個
+
+### spawn_ai_object（自然言語）
+
+既存の `window.spawnAIObject()` を呼び出す。
+日本語テキストからサイズ・形状・色を自動解析:
+- 「50センチの赤い球」→ sphere, size=0.5, color=red
+- 「巨大な金色のドーナツ」→ torus, size=5.0, color=gold
+
+### Grokが自分で3Dデータを作って送ることは可能か？
+
+**直接は不可能**（Realtime APIはテキスト/音声/Function Callingのみ）。
+ただし`spawn_object`のパラメータ指定で**実質的に同等のことが可能**。
+GrokがFunction Callで形状・サイズ・色・位置を指定 → クライアント側でThree.jsオブジェクト生成。
+
+---
+
+## ⚠️ 注意点・既知の課題
+
+### ツール定義のサイズ制限
+- モーション名を全120個送るとトークン消費が大きい → 上位60個に制限
+- 対策: カテゴリ/キーワード検索で間接的に全モーションにアクセス可能
+
+### 画像生成のCORS
+- Grok Aurora REST API呼び出しはクライアントサイドfetchのため、CORSの影響を受ける可能性
+- server.pyにプロキシエンドポイントを追加することで回避可能
+
+### 非同期Function Call
+- `generate_and_show_image` はPromiseを返す
+- grok-realtime-client.js V4.0で `result instanceof Promise` チェックを追加済み
+
+### Body Controller未初期化時
+- VRM読み込み前にGrok Voiceを起動すると `meshParts.length === 0` でフォールバックツール定義が使われる
+- VRM読み込み後に `refreshSession()` で再送信すれば動的にツール定義が更新される
+
+---
+
+## 🔑 グローバルオブジェクト
+
+| オブジェクト | 説明 |
+|-------------|------|
+| `window.grokExtendedTools` | GrokExtendedToolsインスタンス |
+| `window.vrmBodyController` | VRMBodyControllerインスタンス |
+| `window.spawnPhysicsObject(type, pos, color, size)` | 物理オブジェクト生成関数 |
+| `window.spawnAIObject(description)` | AI自然言語オブジェクト生成関数 |
+| `window.physicsWorld` | Cannon.js物理ワールド |
+| `window.physicsObjects` | 物理オブジェクト配列 |
+| `window.imaginationWipe` | 想像ワイプシステム |
+| `window.tripo3DGenerator` | Tripo3Dジェネレータ |
+
+---
+
+## 🧪 テスト方法
+
+1. A0101（またはそれ以降）を開く: `http://localhost:8081/`
+2. VRMモデルを読み込む
+3. Grok APIキーを設定
+4. Grok Voice開始（マイクON）
+5. テスト会話例:
+   - 「踊って！」→ play_motion(category: "ダンス")
+   - 「暑くない？」→ change_clothing("clothing", 0) + 応答
+   - 「頭おっきくして」→ change_body_shape("head", 2.5, 2.5, 2.5)
+   - 「赤い球出して！」→ spawn_object("sphere", 0.5, "red")
+   - 「無重力にして！」→ control_physics("set_gravity", 0)
+   - 「絵描いて見せて」→ generate_and_show_image(prompt)
+
+---
+
+## 📝 バージョン履歴
+
+| バージョン | 内容 | ファイル |
+|-----------|------|---------|
+| V1.0 | 基本WebSocket接続、音声再生 | grok-realtime-client.js |
+| V2.0 | リアルタイムリップシンク | grok-realtime-client.js |
+| V2.1 | 会話履歴コンテキスト追加 | grok-realtime-client.js |
+| V3.0 | Function Calling + Body Control | grok-realtime-client.js, vrm-body-control.js |
+| **V4.0** | **Extended Tools統合（モーション/物理/画像生成）** | **grok-realtime-client.js, grok-extended-tools.js** |
+
+---
+
+## 🏗️ 今後の拡張案
+
+- カスタムテクスチャプリセット選択ツール
+- カメラ操作ツール（Grokが自分でカメラアングル変更）
+- BGM/SE操作ツール
+- 背景変更ツール
+- エフェクト発動ツール（パーティクル、神経光等）
+- 複数キャラ間でのツール共有（マルチキャラ対応）

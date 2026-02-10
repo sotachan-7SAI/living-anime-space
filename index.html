@@ -1,0 +1,2056 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>🎭 VRM AI チャットビューアー</title>
+    
+    <!-- Audio追跡システム（早期初期化） -->
+    <script>
+    (function() {
+        // 追跡用オブジェクト
+        window._audioTracker = {
+            audios: new Set(),
+            add: function(audio) {
+                this.audios.add(audio);
+                audio.addEventListener('ended', () => this.audios.delete(audio));
+                audio.addEventListener('error', () => this.audios.delete(audio));
+            },
+            getPlaying: function() {
+                const playing = [];
+                this.audios.forEach(audio => {
+                    if (!audio.paused && !audio.ended) playing.push(audio);
+                });
+                return playing;
+            },
+            getAll: function() { return Array.from(this.audios); },
+            stopDuplicates: function() {
+                const playing = this.getPlaying();
+                if (playing.length <= 1) return 0;
+                let stopped = 0;
+                for (let i = 1; i < playing.length; i++) {
+                    try { playing[i].pause(); playing[i].currentTime = 0; stopped++; } catch(e) {}
+                }
+                return stopped;
+            },
+            stopAll: function() {
+                let stopped = 0;
+                this.audios.forEach(audio => {
+                    if (!audio.paused) {
+                        try { audio.pause(); audio.currentTime = 0; stopped++; } catch(e) {}
+                    }
+                });
+                return stopped;
+            }
+        };
+        
+        // Audioコンストラクタをフック
+        const OriginalAudio = window.Audio;
+        window.Audio = function(src) {
+            const audio = new OriginalAudio(src);
+            window._audioTracker.add(audio);
+            return audio;
+        };
+        window.Audio.prototype = OriginalAudio.prototype;
+        console.log('🔊 Audio追跡システム初期化完了');
+    })();
+    </script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', 'Yu Gothic', 'Meiryo', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            overflow: hidden;
+        }
+        
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        
+        /* ドラッグ&ドロップオーバーレイ */
+        #drop-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(102, 126, 234, 0.95);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            pointer-events: none;
+        }
+        
+        #drop-overlay.active {
+            display: flex;
+        }
+        
+        .drop-message {
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        
+        /* 左パネル - モデル選択 */
+        #left-panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px;
+            border-radius: 10px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            max-width: 180px;
+            max-height: 85vh;
+            overflow-y: auto;
+            font-size: 11px;
+        }
+        
+        /* 右パネル - モーション・カメラ */
+        #right-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px;
+            border-radius: 10px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            max-width: 180px;
+            font-size: 11px;
+        }
+        
+        /* 右下パネル - チャット */
+        #chat-panel {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px;
+            border-radius: 10px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            width: 260px;
+            max-width: 260px;
+            font-size: 11px;
+        }
+        
+        .panel-title {
+            font-size: 12px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 4px;
+        }
+        
+        /* モデル選択 */
+        .model-upload {
+            border: 2px dashed #667eea;
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 8px;
+        }
+        
+        .model-upload:hover {
+            background: #f8f9ff;
+            border-color: #764ba2;
+        }
+        
+        .model-upload-icon {
+            font-size: 24px;
+            margin-bottom: 4px;
+        }
+        
+        .model-list {
+            margin-top: 8px;
+        }
+        
+        .model-item {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 6px 8px;
+            margin-bottom: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+        }
+        
+        .model-item:hover {
+            border-color: #667eea;
+            transform: translateX(2px);
+        }
+        
+        .model-item.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: #667eea;
+        }
+        
+        /* モーショングリッド */
+        .motion-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+        
+        .motion-card {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+        
+        .motion-card:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+        
+        .motion-card.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: #667eea;
+        }
+        
+        .motion-card.more {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            border-color: #f093fb;
+        }
+        
+        .motion-card.more:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 12px rgba(240, 147, 251, 0.5);
+        }
+        
+        .motion-card.eromotion {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+            color: white;
+            border-color: #ff6b6b;
+        }
+        
+        .motion-card.eromotion:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 12px rgba(255, 107, 107, 0.5);
+        }
+        
+        .motion-icon {
+            font-size: 16px;
+            margin-bottom: 2px;
+        }
+        
+        .motion-name {
+            font-size: 9px;
+            font-weight: 600;
+        }
+        
+        /* カメラボタン */
+        .camera-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+        }
+        
+        .camera-btn {
+            padding: 6px;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 9px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        
+        .camera-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+        
+        /* チャットエリア */
+        #chat-messages {
+            height: 80px;
+            overflow-y: auto;
+            margin-bottom: 8px;
+            padding: 6px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            font-size: 10px;
+        }
+        
+        /* 音声設定 */
+        .voice-settings {
+            margin-top: 8px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .message {
+            margin-bottom: 6px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            max-width: 85%;
+        }
+        
+        .message.user {
+            background: #1b5e20 !important;
+            color: white !important;
+            margin-left: auto;
+            text-align: right;
+        }
+        
+        /* ユーザーメッセージの背景色を確実に濃い緑にする（上書き防止） */
+        #chat-messages .message.user,
+        .message.user,
+        div.message.user {
+            background-color: #1b5e20 !important;
+            background: #1b5e20 !important;
+            color: #ffffff !important;
+        }
+        
+        .message.ai {
+            background: white;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .message-sender {
+            font-size: 9px;
+            font-weight: bold;
+            margin-bottom: 2px;
+            opacity: 0.8;
+        }
+        
+        .message-text {
+            font-size: 10px;
+        }
+        
+        /* チャット入力 */
+        .chat-input-container {
+            display: flex;
+            gap: 6px;
+        }
+        
+        #chat-input {
+            flex: 1;
+            padding: 6px 8px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 11px;
+        }
+        
+        #chat-send {
+            padding: 6px 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 10px;
+            transition: all 0.3s;
+        }
+        
+        #chat-send:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.5);
+        }
+        
+        .voice-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 4px;
+            font-size: 10px;
+        }
+        
+        /* ローディング */
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #667eea;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .section {
+            margin-bottom: 10px;
+        }
+        
+        .section-title {
+            font-size: 10px;
+            font-weight: bold;
+            color: #666;
+            margin-bottom: 6px;
+        }
+        
+        .btn-primary {
+            width: 100%;
+            padding: 6px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 6px;
+            font-size: 10px;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.5);
+        }
+        
+        .btn-secondary {
+            width: 100%;
+            padding: 6px;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 6px;
+            font-size: 10px;
+        }
+        
+        .btn-danger {
+            width: 100%;
+            padding: 6px;
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 6px;
+            font-size: 10px;
+        }
+        
+        /* 性格設定モーダル */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        
+        .modal-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .modal-textarea {
+            width: 100%;
+            min-height: 200px;
+            padding: 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: 'Segoe UI', 'Yu Gothic', 'Meiryo', sans-serif;
+            resize: vertical;
+        }
+        
+        .modal-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        
+        .modal-buttons button {
+            flex: 1;
+        }
+        
+        /* モーション選択モーダル */
+        #motion-list-modal .modal-content {
+            max-width: 400px;
+            max-height: 80vh;
+        }
+        
+        .motion-list-container {
+            max-height: 50vh;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        
+        .motion-list-item {
+            background: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .motion-list-item:hover {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: #667eea;
+            transform: translateX(3px);
+        }
+        
+        .motion-list-item .motion-list-icon {
+            font-size: 20px;
+        }
+        
+        .motion-list-item .motion-list-name {
+            flex: 1;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .motion-list-item .motion-list-duration {
+            font-size: 10px;
+            color: #888;
+        }
+        
+        .motion-list-item:hover .motion-list-duration {
+            color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .motion-list-loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        
+        .motion-list-empty {
+            text-align: center;
+            padding: 20px;
+            color: #999;
+            font-size: 12px;
+        }
+        
+        /* スクロールバーを細く */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 2px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 2px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a1a1a1;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    
+    <!-- ドラッグ&ドロップオーバーレイ -->
+    <div id="drop-overlay">
+        <div class="drop-message">
+            📂 VRM / FBX / BVH / NPZ ファイルをドロップ！
+        </div>
+    </div>
+    
+    <!-- ローディング -->
+    <div id="loading">
+        <div class="spinner"></div>
+        <div style="font-size: 20px; font-weight: bold; color: #333; margin-bottom: 10px;">読み込み中...</div>
+        <div style="font-size: 14px; color: #666;">
+            起動後、VRMファイルをドラッグ&ドロップしてください
+        </div>
+    </div>
+    
+    <!-- 左パネル: モデル選択 -->
+    <div id="left-panel" style="display: none;">
+        <div class="panel-title">
+            <span>🎭</span>
+            <span>VRMモデル</span>
+        </div>
+        
+        <div class="model-upload" id="model-upload">
+            <div class="model-upload-icon">📂</div>
+            <div><strong>VRM / FBX ファイルを選択</strong></div>
+            <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                またはドラッグ&ドロップ
+            </div>
+            <input type="file" id="model-file-input" accept=".vrm,.fbx,.bvh,.npz" style="display: none;">
+        </div>
+        
+        <div class="section">
+            <div class="section-title">📁 利用可能なモデル</div>
+            <div class="model-list" id="model-list">
+                <div class="model-item" data-model="default">
+                    <span>🎭</span>
+                    <span>大人ジャイ美頭大</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 右パネル: モーション・カメラ -->
+    <div id="right-panel" style="display: none;">
+        <div class="panel-title">
+            <span>💃</span>
+            <span>モーション</span>
+        </div>
+        
+        <div class="section">
+            <div class="motion-grid">
+                <div class="motion-card" data-motion="1">
+                    <div class="motion-icon">🧍</div>
+                    <div class="motion-name">全身</div>
+                </div>
+                <div class="motion-card" data-motion="2">
+                    <div class="motion-icon">👋</div>
+                    <div class="motion-name">挨拶</div>
+                </div>
+                <div class="motion-card" data-motion="3">
+                    <div class="motion-icon">✌️</div>
+                    <div class="motion-name">Vサイン</div>
+                </div>
+                <div class="motion-card" data-motion="4">
+                    <div class="motion-icon">👉</div>
+                    <div class="motion-name">撃つ</div>
+                </div>
+                <div class="motion-card" data-motion="5">
+                    <div class="motion-icon">🔄</div>
+                    <div class="motion-name">回る</div>
+                </div>
+                <div class="motion-card" data-motion="6">
+                    <div class="motion-icon">🤔</div>
+                    <div class="motion-name">ポーズ</div>
+                </div>
+                <div class="motion-card" data-motion="7">
+                    <div class="motion-icon">🏃</div>
+                    <div class="motion-name">屈伸</div>
+                </div>
+                <div class="motion-card more" id="more-motions-btn">
+                    <div class="motion-icon">📁</div>
+                    <div class="motion-name">その他...</div>
+                </div>
+                <div class="motion-card eromotion" id="eromotion-btn">
+                    <div class="motion-icon">💋</div>
+                    <div class="motion-name">eromotion</div>
+                </div>
+            </div>
+            <button class="btn-danger" id="stop-motion-btn">⏹️ 停止</button>
+            <button class="btn-primary" id="download-motion-btn" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);">💾 モーションを保存</button>
+        </div>
+        
+        <div class="section">
+            <div class="section-title">📹 カメラ</div>
+            <div class="camera-grid">
+                <div class="camera-btn" id="reset-camera-btn">
+                    <div>🔄</div>
+                    <div>リセット</div>
+                </div>
+                <div class="camera-btn" id="zoom-in-btn">
+                    <div>🔍</div>
+                    <div>接近</div>
+                </div>
+                <div class="camera-btn" id="zoom-out-btn">
+                    <div>🔎</div>
+                    <div>離れる</div>
+                </div>
+            </div>
+            <button id="camera-effects-btn" style="width:100%;margin-top:6px;padding:8px;background:linear-gradient(135deg, #667eea 0%, #764ba2 100%);color:white;border:none;border-radius:6px;cursor:pointer;font-size:10px;font-weight:bold;">
+                🎨 カメラ演出パネル
+            </button>
+            <button id="ai-cinematographer-btn" style="width:100%;margin-top:6px;padding:8px;background:linear-gradient(135deg, #ff6b35 0%, #ffcc00 100%);color:#1a1a2e;border:none;border-radius:6px;cursor:pointer;font-size:10px;font-weight:bold;">
+                🎬 AI演出監督
+            </button>
+        </div>
+    </div>
+    
+    <!-- 下パネル: チャット -->
+    <div id="chat-panel" style="display: none;">
+        <div class="panel-title">
+            <span>💬</span>
+            <span>AI チャット</span>
+        </div>
+        
+        <div id="chat-messages"></div>
+        
+        <div class="chat-input-container">
+            <input type="text" id="chat-input" placeholder="メッセージを入力...">
+            <button id="chat-send">送信</button>
+            <button id="screen-capture-btn" title="画面キャプチャしてAIに見せる" style="padding:6px 10px; background:linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color:white; border:none; border-radius:6px; cursor:pointer; font-size:12px;">📸</button>
+        </div>
+        
+        <div class="voice-settings">
+            <button class="btn-primary" id="chatgpt-mode-toggle">🤖 ChatGPT OFF</button>
+            <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                ChatGPT：賢いAIが会話を生成
+            </div>
+            
+            <button class="btn-secondary" id="character-settings-btn" style="margin-top: 15px;">🎭 性格設定</button>
+            <div style="margin-top: 5px; font-size: 12px; color: #666;">
+                キャラクターの話し方をカスタマイズ
+            </div>
+            
+            <button class="btn-primary" id="voice-mode-toggle" style="margin-top: 15px;">🎤 音声モードOFF</button>
+            <div style="margin-top: 5px; font-size: 12px; color: #666;">
+                音声モード：マイクで直接会話
+            </div>
+            
+            <div style="margin-top: 15px;">
+                <div style="font-size: 13px; font-weight: bold; color: #333; margin-bottom: 8px;">
+                    🎵 声質選択
+                </div>
+                <select id="voice-select" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;">
+                    <optgroup label="📣 ブラウザTTS（無料）">
+                        <option value="browser-female-1">女性声 1</option>
+                        <option value="browser-female-2">女性声 2</option>
+                        <option value="browser-male-1">男性声 1</option>
+                        <option value="browser-male-2">男性声 2</option>
+                    </optgroup>
+                    <optgroup label="✨ OpenAI Realtime（高品質）">
+                        <option value="alloy">🌟 Alloy - 中性的でバランスの良い声</option>
+                        <option value="echo">🗣️ Echo - 男性的で落ち着いた声</option>
+                        <option value="shimmer">🌙 Shimmer - 柔らかく優しい女性の声</option>
+                    </optgroup>
+                </select>
+                <div style="margin-top: 5px; font-size: 11px; color: #999;">
+                    ※ Realtime音声は音声モードON時のみ使用可能
+                </div>
+            </div>
+            
+            <div class="voice-toggle" style="margin-top: 15px;">
+                <input type="checkbox" id="voice-enabled">
+                <label for="voice-enabled">🔊 音声読み上げ（通常モード）</label>
+            </div>
+            <div class="voice-toggle">
+                <input type="checkbox" id="lipsync-enabled">
+                <label for="lipsync-enabled">👄 リップシンク</label>
+            </div>
+        </div>
+    </div>
+    
+    <!-- モーション選択モーダル -->
+    <div id="motion-list-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-title">
+                <span>📁</span>
+                <span>モーション一覧</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                <input type="text" id="motion-search-input" placeholder="🔍 モーションを検索..." style="flex: 1; padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 12px;">
+                <span id="motion-count" style="font-size: 11px; color: #888; white-space: nowrap;"></span>
+            </div>
+            <div class="motion-list-container" id="motion-list-container">
+                <div class="motion-list-loading">読み込み中...</div>
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-danger" id="close-motion-list-btn">閉じる</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Eromotion一覧モーダル -->
+    <div id="eromotion-list-modal" class="modal">
+        <div class="modal-content" style="max-width: 450px; max-height: 80vh;">
+            <div class="modal-title">
+                <span>💋</span>
+                <span>eromotion一覧</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                <input type="text" id="eromotion-search-input" placeholder="🔍 eromotionを検索..." style="flex: 1; padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 12px;">
+                <span id="eromotion-count" style="font-size: 11px; color: #888; white-space: nowrap;"></span>
+            </div>
+            <div class="motion-list-container" id="eromotion-list-container">
+                <div class="motion-list-loading">読み込み中...</div>
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-danger" id="close-eromotion-list-btn">閉じる</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 性格設定モーダル -->
+    <div id="character-settings-modal" class="modal">
+        <div class="modal-content" style="position: relative;">
+            <button id="close-character-modal-btn" style="position: absolute; top: 10px; right: 10px; background: #ff6b6b; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" title="閉じる">✕</button>
+            <div class="modal-title">
+                <span>🎭</span>
+                <span>キャラクター性格設定</span>
+            </div>
+            
+            <div style="margin-bottom: 15px; font-size: 14px; color: #666;">
+                キャラクターがどのように振る舞うかを設定します。<br>
+                例：「あなたは明るく元気な女の子です。絵文字をたくさん使います。」
+            </div>
+            
+            <!-- プリセット選択セクション -->
+            <div id="preset-section" style="margin-bottom: 15px; padding: 12px; background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1)); border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.3);">
+                <div style="font-size: 13px; font-weight: bold; color: #667eea; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                    <span>📂</span>
+                    <span>プリセットから読み込み</span>
+                </div>
+                <div id="preset-list" style="max-height: 150px; overflow-y: auto;">
+                    <div style="color: #888; font-size: 11px; text-align: center; padding: 10px;">読み込み中...</div>
+                </div>
+            </div>
+            
+            <!-- プリセット保存セクション -->
+            <div id="preset-save-section" style="margin-bottom: 15px; padding: 12px; background: linear-gradient(135deg, rgba(17, 153, 142, 0.1), rgba(56, 239, 125, 0.1)); border-radius: 8px; border: 1px solid rgba(17, 153, 142, 0.3);">
+                <div style="font-size: 13px; font-weight: bold; color: #11998e; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                    <span>💾</span>
+                    <span>プリセットに保存</span>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" id="preset-name-input" placeholder="プリセット名を入力..." style="flex: 1; padding: 8px 12px; border: 1px solid #11998e; border-radius: 6px; font-size: 12px;">
+                    <button id="save-preset-btn" style="padding: 8px 16px; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;">💾 保存</button>
+                </div>
+                <div style="font-size: 10px; color: #888; margin-top: 6px;">※ 下のテキストエリアの内容が保存されます</div>
+            </div>
+            
+            <textarea id="character-prompt" class="modal-textarea" placeholder="キャラクターの性格や話し方を詳しく記述してください..."></textarea>
+            
+            <div style="margin-top: 15px; font-size: 13px; color: #999;">
+                <strong>💡 ヒント：</strong><br>
+                ・ 性格：明るい、優しい、クール、おっとり等<br>
+                ・ 話し方：敷語、絵文字、口調等<br>
+                ・ 役割：アシスタント、友達、先生等<br>
+                ・ 得意分野：技術、芸術、料理等
+            </div>
+            
+            <div class="modal-buttons">
+                <button class="btn-danger" id="cancel-character-btn">キャンセル</button>
+                <button class="btn-primary" id="save-character-btn">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Import Maps で依存関係を解決 -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/",
+            "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.0/lib/three-vrm.module.js",
+            "@pixiv/three-vrm-animation": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@2.1.0/lib/three-vrm-animation.module.js"
+        }
+    }
+    </script>
+    
+    <!-- API設定（最初に読み込む） -->
+    <script src="./config.js"></script>
+    
+    <!-- API設定パネル（UIで簡単にAPIキー変更） -->
+    <script src="./api-settings-panel.js"></script>
+    
+    <!-- メインスクリプト -->
+    <script type="module" src="./main.js?v=3.4"></script>
+    
+    <!-- カスタム機能拡張 -->
+    <script src="./custom.js"></script>
+    
+    <!-- 3D環境マネージャー（SparkJS / Gaussian Splats） -->
+    <script src="./spark-environment.js"></script>
+    
+    <!-- 物理演算 & FPSシステム -->
+    <script src="./physics-system.js"></script>
+    
+    <!-- AIオブジェクト生成 -->
+    <script src="./ai-object-generator.js"></script>
+    
+    <!-- Tripo3D 3Dモデル生成 -->
+    <script src="./tripo3d-generator.js"></script>
+    
+    <!-- VRM当たり判定（physics-system.jsに統合済みのため無効化） -->
+    <!-- <script src="./vrm-collider.js"></script> -->
+    
+    <!-- 右クリックメニュー -->
+    <script src="./model-context-menu.js"></script>
+    
+    <!-- 👗 マテリアル透明度・着せ替えパネル -->
+    <script src="./material-panel.js?v=1.0"></script>
+    
+    <!-- HY-Motion Integration v3.3 - inline to avoid cache - UPDATED 20260115 -->
+    <script type="module">
+    // HY-Motion v3.2 inline
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
+    
+    class HYMotionIntegration {
+        constructor(app) {
+            this.app = app;
+            this.currentVrmAnimation = null;
+            this.currentMixer = null;
+            this.currentAction = null;
+            this.isPlaying = false;
+            this.playbackSpeed = 1.0;
+            this.clock = new THREE.Clock();
+            this.lastVRMABlob = null;
+            this.SMPL_TO_VRM = {
+                0: 'hips', 1: 'leftUpperLeg', 2: 'rightUpperLeg', 3: 'spine',
+                4: 'leftLowerLeg', 5: 'rightLowerLeg', 6: 'chest', 7: 'leftFoot',
+                8: 'rightFoot', 9: 'upperChest', 10: 'leftToes', 11: 'rightToes',
+                12: 'neck', 13: 'leftShoulder', 14: 'rightShoulder', 15: 'head',
+                16: 'leftUpperArm', 17: 'rightUpperArm', 18: 'leftLowerArm', 19: 'rightLowerArm',
+                20: 'leftHand', 21: 'rightHand'
+            };
+            this.init();
+        }
+        
+        init() {
+            this.createUI();
+            this.setupEventListeners();
+            this.startAnimationLoop();
+            this.preloadFflate();
+            console.log('🎬 HY-Motion Integration v3.3 (inline + autoPlay) loaded');
+        }
+        
+        async preloadFflate() {
+            try {
+                await this.loadScript('https://cdn.jsdelivr.net/npm/fflate@0.8.0/umd/index.min.js');
+                console.log('✅ fflateライブラリ読み込み完了');
+            } catch (e) {
+                console.warn('⚠️ fflate読み込み失敗');
+            }
+        }
+        
+        createUI() {
+            const panel = document.createElement('div');
+            panel.id = 'hy-motion-panel';
+            panel.innerHTML = `
+                <style>
+                    #hy-motion-panel { position: fixed; top: 50%; right: 10px; transform: translateY(-50%); background: rgba(30, 30, 50, 0.95); padding: 15px; border-radius: 12px; color: #fff; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13px; z-index: 1000; min-width: 280px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+                    #hy-motion-panel h3 { margin: 0 0 12px 0; color: #4ecdc4; font-size: 14px; border-bottom: 1px solid #4ecdc4; padding-bottom: 8px; }
+                    #hy-motion-panel .status { background: rgba(78,205,196,0.1); padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; color: #4ecdc4; word-break: break-all; font-size: 12px; }
+                    #hy-motion-panel .status.empty { color: #666; background: rgba(255,255,255,0.05); }
+                    #hy-motion-panel .drop-area { border: 2px dashed #4ecdc4; border-radius: 8px; padding: 15px; text-align: center; cursor: pointer; margin-bottom: 10px; transition: all 0.2s; }
+                    #hy-motion-panel .drop-area:hover { background: rgba(78,205,196,0.1); }
+                    #hy-motion-panel .drop-area.dragover { background: rgba(78,205,196,0.2); border-color: #fff; }
+                    #hy-motion-panel .controls { display: flex; gap: 8px; margin-top: 10px; }
+                    #hy-motion-panel button { flex: 1; padding: 8px; border: none; border-radius: 6px; cursor: pointer; background: #4ecdc4; color: #1a1a2e; font-weight: bold; transition: all 0.2s; }
+                    #hy-motion-panel button:hover { background: #45b7aa; }
+                    #hy-motion-panel button:disabled { background: #333; color: #666; cursor: not-allowed; }
+                    #hy-motion-panel .info { text-align: center; margin-top: 8px; color: #888; font-size: 11px; }
+                    #hy-motion-panel .speed-control { margin-top: 10px; }
+                    #hy-motion-panel .speed-control label { display: block; margin-bottom: 5px; color: #888; }
+                    #hy-motion-panel .speed-control input { width: 100%; }
+                    #hy-motion-panel .toggle-btn { position: absolute; top: -30px; left: 0; background: #4ecdc4; border: none; padding: 5px 10px; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 12px; color: #1a1a2e; font-weight: bold; }
+                    #hy-motion-panel.collapsed .panel-content { display: none; }
+                    #hy-motion-panel .download-btn { margin-top: 8px; background: #6c5ce7; font-size: 11px; padding: 6px; }
+                    #hy-motion-panel .download-btn:hover { background: #5b4cdb; }
+                </style>
+                <button class="toggle-btn" id="hy-motion-toggle">🎬 HY-Motion</button>
+                <div class="panel-content">
+                    <h3>🎬 HY-Motion v3.2</h3>
+                    <div class="status empty" id="hy-motion-status">モーション未読み込み</div>
+                    <div class="drop-area" id="hy-motion-drop">
+                        📁 NPZ / VRMAファイルをドロップ<br>
+                        <small style="color:#666">またはクリックして選択</small>
+                        <input type="file" id="hy-motion-file" accept=".npz,.vrma,.glb" style="display:none">
+                    </div>
+                    <div class="controls">
+                        <button id="hy-motion-play" disabled>▶ Play</button>
+                        <button id="hy-motion-stop" disabled>⏹ Stop</button>
+                    </div>
+                    <button class="download-btn" id="hy-motion-download" disabled style="width:100%">💾 VRMAをダウンロード</button>
+                    <div class="info" id="hy-motion-info"></div>
+                    <div class="speed-control">
+                        <label>速度: <span id="hy-motion-speed-val">1.0</span>x</label>
+                        <input type="range" id="hy-motion-speed" min="0.1" max="2" step="0.1" value="1">
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(panel);
+        }
+        
+        setupEventListeners() {
+            const dropArea = document.getElementById('hy-motion-drop');
+            const fileInput = document.getElementById('hy-motion-file');
+            dropArea.addEventListener('click', () => fileInput.click());
+            dropArea.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropArea.classList.add('dragover'); });
+            dropArea.addEventListener('dragleave', () => dropArea.classList.remove('dragover'));
+            dropArea.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); dropArea.classList.remove('dragover'); if (e.dataTransfer.files[0]) this.loadFile(e.dataTransfer.files[0]); });
+            fileInput.addEventListener('change', (e) => { if (e.target.files[0]) this.loadFile(e.target.files[0]); });
+            document.getElementById('hy-motion-play').addEventListener('click', () => this.togglePlay());
+            document.getElementById('hy-motion-stop').addEventListener('click', () => this.stop());
+            document.getElementById('hy-motion-download').addEventListener('click', () => this.downloadVRMA());
+            document.getElementById('hy-motion-speed').addEventListener('input', (e) => {
+                this.playbackSpeed = parseFloat(e.target.value);
+                document.getElementById('hy-motion-speed-val').textContent = this.playbackSpeed.toFixed(1);
+                if (this.currentAction) this.currentAction.setEffectiveTimeScale(this.playbackSpeed);
+            });
+            document.getElementById('hy-motion-toggle').addEventListener('click', () => document.getElementById('hy-motion-panel').classList.toggle('collapsed'));
+        }
+        
+        async loadFile(file) {
+            const fileName = file.name.toLowerCase();
+            document.getElementById('hy-motion-status').textContent = '読み込み中...';
+            document.getElementById('hy-motion-status').classList.remove('empty');
+            try {
+                if (fileName.endsWith('.npz')) {
+                    await this.loadNPZ(file);
+                } else if (fileName.endsWith('.vrma') || fileName.endsWith('.glb')) {
+                    await this.loadVRMA(file);
+                } else {
+                    throw new Error('未対応のファイル形式です');
+                }
+            } catch (err) {
+                console.error('Motion load error:', err);
+                document.getElementById('hy-motion-status').textContent = 'エラー: ' + err.message;
+                document.getElementById('hy-motion-status').classList.add('empty');
+                alert('モーションファイルの読み込みに失敗しました: ' + err.message);
+            }
+        }
+        
+        async loadNPZ(file) {
+            console.log('📦 Loading NPZ:', file.name);
+            const arrayBuffer = await file.arrayBuffer();
+            let unzipped;
+            if (typeof fflate !== 'undefined' && typeof fflate.unzipSync === 'function') {
+                console.log('📦 Using fflate');
+                const uint8 = new Uint8Array(arrayBuffer);
+                unzipped = fflate.unzipSync(uint8);
+            } else {
+                console.log('📦 Using browser API');
+                unzipped = await this.unzipNPZBrowser(arrayBuffer);
+            }
+            const npzData = {};
+            for (const [filename, data] of Object.entries(unzipped)) {
+                if (filename.endsWith('.npy')) {
+                    const name = filename.replace('.npy', '');
+                    npzData[name] = this.parseNPY(data);
+                }
+            }
+            console.log('📦 NPZ keys:', Object.keys(npzData));
+            if (!npzData.rot6d) throw new Error('rot6dデータがNPZに含まれていません');
+            const vrmaBlob = this.createVRMAFromNPZ(npzData, file.name);
+            this.lastVRMABlob = vrmaBlob;
+            await this.loadVRMAFromBlob(vrmaBlob, npzData.text || file.name);
+            document.getElementById('hy-motion-download').disabled = false;
+        }
+        
+        async unzipNPZBrowser(arrayBuffer) {
+            const view = new DataView(arrayBuffer);
+            const files = {};
+            let offset = 0;
+            while (offset < arrayBuffer.byteLength - 4) {
+                const sig = view.getUint32(offset, true);
+                if (sig === 0x04034b50) {
+                    const compMethod = view.getUint16(offset + 8, true);
+                    const compSize = view.getUint32(offset + 18, true);
+                    const fnLen = view.getUint16(offset + 26, true);
+                    const exLen = view.getUint16(offset + 28, true);
+                    const fn = new TextDecoder().decode(new Uint8Array(arrayBuffer, offset + 30, fnLen));
+                    const dataStart = offset + 30 + fnLen + exLen;
+                    const compData = new Uint8Array(arrayBuffer, dataStart, compSize);
+                    let fileData;
+                    if (compMethod === 0) { fileData = compData; }
+                    else if (compMethod === 8) { fileData = await this.inflateData(compData); }
+                    else { fileData = compData; }
+                    files[fn] = fileData;
+                    offset = dataStart + compSize;
+                } else if (sig === 0x02014b50) { break; }
+                else { offset++; }
+            }
+            return files;
+        }
+        
+        async inflateData(compData) {
+            const ds = new DecompressionStream('deflate-raw');
+            const writer = ds.writable.getWriter();
+            writer.write(compData); writer.close();
+            const reader = ds.readable.getReader();
+            const chunks = [];
+            while (true) { const {done, value} = await reader.read(); if (done) break; chunks.push(value); }
+            const total = chunks.reduce((a, c) => a + c.length, 0);
+            const result = new Uint8Array(total);
+            let off = 0; for (const c of chunks) { result.set(c, off); off += c.length; }
+            return result;
+        }
+        
+        parseNPY(data) {
+            const magic = String.fromCharCode(...data.slice(0, 6));
+            if (magic !== '\x93NUMPY') throw new Error('Invalid NPY');
+            const ver = [data[6], data[7]];
+            let hdrLen, hdrOff;
+            if (ver[0] === 1) { hdrLen = data[8] | (data[9] << 8); hdrOff = 10; }
+            else { hdrLen = data[8] | (data[9] << 8) | (data[10] << 16) | (data[11] << 24); hdrOff = 12; }
+            const hdrStr = String.fromCharCode(...data.slice(hdrOff, hdrOff + hdrLen));
+            const header = this.parseNPYHeader(hdrStr);
+            const dataOff = hdrOff + hdrLen;
+            const bytes = data.slice(dataOff);
+            return this.readNPYData(bytes, header);
+        }
+        
+        parseNPYHeader(s) {
+            const r = {};
+            const dm = s.match(/'descr':\s*'([^']+)'/);
+            if (dm) r.descr = dm[1];
+            r.fortran_order = s.includes("'fortran_order': True");
+            const sm = s.match(/'shape':\s*\(([^)]+)\)/);
+            if (sm) r.shape = sm[1].split(',').map(x => x.trim()).filter(x => x).map(x => parseInt(x));
+            return r;
+        }
+        
+        readNPYData(bytes, hdr) {
+            const dtype = hdr.descr, shape = hdr.shape;
+            const aligned = new ArrayBuffer(bytes.byteLength);
+            new Uint8Array(aligned).set(bytes);
+            let arr;
+            if (dtype.includes('f4')) arr = new Float32Array(aligned);
+            else if (dtype.includes('f8')) arr = new Float64Array(aligned);
+            else if (dtype.includes('U') || dtype.includes('S')) return new TextDecoder('utf-8').decode(bytes).replace(/\x00/g, '').trim();
+            else arr = new Float32Array(aligned);
+            if (shape && shape.length > 1) return this.reshapeArray(Array.from(arr), shape);
+            return Array.from(arr);
+        }
+        
+        reshapeArray(flat, shape) {
+            if (shape.length === 1) return flat;
+            if (shape.length === 2) { const [r, c] = shape; const res = []; for (let i = 0; i < r; i++) res.push(flat.slice(i*c, (i+1)*c)); return res; }
+            if (shape.length === 3) { const [d0, d1, d2] = shape; const res = []; for (let i = 0; i < d0; i++) { const p = []; for (let j = 0; j < d1; j++) { const s = (i*d1+j)*d2; p.push(flat.slice(s, s+d2)); } res.push(p); } return res; }
+            if (shape.length === 4) { const [d0, d1, d2, d3] = shape; const res = []; for (let i = 0; i < d0; i++) { const c = []; for (let j = 0; j < d1; j++) { const p = []; for (let k = 0; k < d2; k++) { const s = ((i*d1+j)*d2+k)*d3; p.push(flat.slice(s, s+d3)); } c.push(p); } res.push(c); } return res; }
+            return flat;
+        }
+        
+        async loadVRMA(file) {
+            const blob = new Blob([await file.arrayBuffer()], { type: 'model/gltf-binary' });
+            await this.loadVRMAFromBlob(blob, file.name);
+            document.getElementById('hy-motion-download').disabled = true;
+        }
+        
+        async loadVRMAFromBlob(blob, name) {
+            const vrm = this.app.vrm;
+            if (!vrm) throw new Error('VRMモデルを先に読み込んでください');
+            const url = URL.createObjectURL(blob);
+            try {
+                const loader = new GLTFLoader();
+                loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
+                const gltf = await loader.loadAsync(url);
+                const vrmAnim = gltf.userData.vrmAnimations?.[0];
+                if (!vrmAnim) throw new Error('VRMAにアニメーションデータがありません');
+                this.currentVrmAnimation = vrmAnim;
+                const clip = createVRMAnimationClip(vrmAnim, vrm);
+                console.log('🎬 Clip:', clip.name, 'Duration:', clip.duration);
+                if (this.currentMixer) this.currentMixer.stopAllAction();
+                this.currentMixer = new THREE.AnimationMixer(vrm.scene);
+                this.currentAction = this.currentMixer.clipAction(clip);
+                this.currentAction.setEffectiveTimeScale(this.playbackSpeed);
+                document.getElementById('hy-motion-status').textContent = '✅ ' + name;
+                document.getElementById('hy-motion-info').textContent = 'Duration: ' + clip.duration.toFixed(2) + 's';
+                document.getElementById('hy-motion-play').disabled = false;
+                document.getElementById('hy-motion-stop').disabled = false;
+                
+                // 🎬 自動再生
+                this.autoPlay();
+            } finally { URL.revokeObjectURL(url); }
+        }
+        
+        createVRMAFromNPZ(npzData, fileName) {
+            let rot6d = npzData.rot6d, transl = npzData.transl;
+            if (rot6d && rot6d.length === 1 && Array.isArray(rot6d[0]) && Array.isArray(rot6d[0][0])) rot6d = rot6d[0];
+            if (transl && transl.length === 1 && Array.isArray(transl[0])) transl = transl[0];
+            const nFrames = rot6d.length, nJoints = rot6d[0].length;
+            let dur = npzData.duration ? (Array.isArray(npzData.duration) ? npzData.duration[0] : npzData.duration) : 5.0;
+            const fps = nFrames / dur;
+            console.log('Converting:', nFrames, 'frames,', nJoints, 'joints,', fps.toFixed(1), 'fps');
+            
+            const times = new Float32Array(nFrames);
+            for (let i = 0; i < nFrames; i++) times[i] = (i / nFrames) * dur;
+            const boneQuats = {}, bufData = [], accessors = [], bufferViews = [];
+            let byteOff = 0;
+            const timeBytes = new Uint8Array(times.buffer);
+            bufData.push(timeBytes);
+            bufferViews.push({ buffer: 0, byteOffset: byteOff, byteLength: timeBytes.byteLength });
+            accessors.push({ bufferView: 0, componentType: 5126, count: nFrames, type: 'SCALAR', min: [times[0]], max: [times[nFrames-1]] });
+            byteOff += timeBytes.byteLength;
+            const pad1 = (4 - (byteOff % 4)) % 4; if (pad1) { bufData.push(new Uint8Array(pad1)); byteOff += pad1; }
+            const channels = [], samplers = [], nodes = [], humanBones = {};
+            let nodeIdx = 0;
+            for (let jIdx = 0; jIdx < Math.min(nJoints, 22); jIdx++) {
+                const boneName = this.SMPL_TO_VRM[jIdx]; if (!boneName) continue;
+                const quats = new Float32Array(nFrames * 4);
+                
+                // 全てのボーンにrot6dをそのまま適用（変換なし）
+                for (let f = 0; f < nFrames; f++) {
+                    const r6d = rot6d[f][jIdx];
+                    const q = this.rot6dToQuat(r6d);
+                    // そのまま使用（座標変換なし）
+                    quats[f*4] = q[0]; quats[f*4+1] = q[1]; quats[f*4+2] = q[2]; quats[f*4+3] = q[3];
+                }
+                
+                boneQuats[boneName] = quats;
+                const qBytes = new Uint8Array(quats.buffer);
+                bufData.push(qBytes);
+                bufferViews.push({ buffer: 0, byteOffset: byteOff, byteLength: qBytes.byteLength });
+                accessors.push({ bufferView: bufferViews.length - 1, componentType: 5126, count: nFrames, type: 'VEC4' });
+                byteOff += qBytes.byteLength;
+                const pad = (4 - (byteOff % 4)) % 4; if (pad) { bufData.push(new Uint8Array(pad)); byteOff += pad; }
+                samplers.push({ input: 0, output: accessors.length - 1, interpolation: 'LINEAR' });
+                channels.push({ sampler: samplers.length - 1, target: { node: nodeIdx, path: 'rotation' } });
+                nodes.push({ name: boneName });
+                humanBones[boneName] = { node: nodeIdx };
+                nodeIdx++;
+            }
+            
+            // translationもそのまま適用
+            if (transl && transl.length === nFrames) {
+                const trans = new Float32Array(nFrames * 3);
+                for (let f = 0; f < nFrames; f++) {
+                    trans[f*3] = transl[f][0];
+                    trans[f*3+1] = transl[f][1];
+                    trans[f*3+2] = transl[f][2];
+                }
+                const tBytes = new Uint8Array(trans.buffer);
+                bufData.push(tBytes);
+                bufferViews.push({ buffer: 0, byteOffset: byteOff, byteLength: tBytes.byteLength });
+                accessors.push({ bufferView: bufferViews.length - 1, componentType: 5126, count: nFrames, type: 'VEC3' });
+                byteOff += tBytes.byteLength;
+                const hipsIdx = nodes.findIndex(n => n.name === 'hips');
+                if (hipsIdx >= 0) {
+                    samplers.push({ input: 0, output: accessors.length - 1, interpolation: 'LINEAR' });
+                    channels.push({ sampler: samplers.length - 1, target: { node: hipsIdx, path: 'translation' } });
+                }
+            }
+            
+            const totalLen = bufData.reduce((s, a) => s + a.byteLength, 0);
+            const buffer = new Uint8Array(totalLen);
+            let off = 0; for (const a of bufData) { buffer.set(a, off); off += a.byteLength; }
+            const gltf = {
+                asset: { version: '2.0', generator: 'HY-Motion v3.3 (raw)' },
+                extensionsUsed: ['VRMC_vrm_animation'],
+                extensions: { VRMC_vrm_animation: { specVersion: '1.0', humanoid: { humanBones } } },
+                buffers: [{ byteLength: buffer.byteLength }],
+                bufferViews, accessors,
+                animations: [{ name: npzData.text || fileName, channels, samplers }],
+                nodes, scenes: [{ nodes: nodes.map((_, i) => i) }], scene: 0
+            };
+            let jsonBytes = new TextEncoder().encode(JSON.stringify(gltf));
+            const jp = (4 - (jsonBytes.byteLength % 4)) % 4;
+            if (jp) { const p = new Uint8Array(jsonBytes.byteLength + jp); p.set(jsonBytes); for (let i = 0; i < jp; i++) p[jsonBytes.byteLength + i] = 0x20; jsonBytes = p; }
+            const bp = (4 - (buffer.byteLength % 4)) % 4;
+            let binBuf = buffer; if (bp) { const p = new Uint8Array(buffer.byteLength + bp); p.set(buffer); binBuf = p; }
+            const glbLen = 12 + 8 + jsonBytes.byteLength + 8 + binBuf.byteLength;
+            const glb = new ArrayBuffer(glbLen);
+            const dv = new DataView(glb);
+            dv.setUint32(0, 0x46546C67, true); dv.setUint32(4, 2, true); dv.setUint32(8, glbLen, true);
+            dv.setUint32(12, jsonBytes.byteLength, true); dv.setUint32(16, 0x4E4F534A, true);
+            new Uint8Array(glb, 20, jsonBytes.byteLength).set(jsonBytes);
+            const binOff = 20 + jsonBytes.byteLength;
+            dv.setUint32(binOff, binBuf.byteLength, true); dv.setUint32(binOff + 4, 0x004E4942, true);
+            new Uint8Array(glb, binOff + 8, binBuf.byteLength).set(binBuf);
+            return new Blob([glb], { type: 'model/gltf-binary' });
+        }
+        
+        rot6dToQuat(r6d) {
+            // rot6d = 回転行列の最初の2列
+            const a1 = [r6d[0], r6d[1], r6d[2]];  // 列1
+            const a2 = [r6d[3], r6d[4], r6d[5]];  // 列2
+            // グラムシュミット直交化
+            const b1 = this.norm(a1);
+            const dot = this.dot(b1, a2);
+            const b2 = this.norm([a2[0] - dot*b1[0], a2[1] - dot*b1[1], a2[2] - dot*b1[2]]);
+            const b3 = this.cross(b1, b2);
+            // 列優先の回転行列
+            const R = [[b1[0], b2[0], b3[0]], [b1[1], b2[1], b3[1]], [b1[2], b2[2], b3[2]]];
+            return this.matToQuat(R);
+        }
+        
+        norm(v) { const l = Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2])+1e-8; return [v[0]/l, v[1]/l, v[2]/l]; }
+        dot(a, b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+        cross(a, b) { return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+        
+        matToQuat(R) {
+            const tr = R[0][0]+R[1][1]+R[2][2]; let x, y, z, w;
+            if (tr > 0) { const s = 0.5/Math.sqrt(tr+1); w = 0.25/s; x = (R[2][1]-R[1][2])*s; y = (R[0][2]-R[2][0])*s; z = (R[1][0]-R[0][1])*s; }
+            else if (R[0][0] > R[1][1] && R[0][0] > R[2][2]) { const s = 2*Math.sqrt(1+R[0][0]-R[1][1]-R[2][2]); w = (R[2][1]-R[1][2])/s; x = 0.25*s; y = (R[0][1]+R[1][0])/s; z = (R[0][2]+R[2][0])/s; }
+            else if (R[1][1] > R[2][2]) { const s = 2*Math.sqrt(1+R[1][1]-R[0][0]-R[2][2]); w = (R[0][2]-R[2][0])/s; x = (R[0][1]+R[1][0])/s; y = 0.25*s; z = (R[1][2]+R[2][1])/s; }
+            else { const s = 2*Math.sqrt(1+R[2][2]-R[0][0]-R[1][1]); w = (R[1][0]-R[0][1])/s; x = (R[0][2]+R[2][0])/s; y = (R[1][2]+R[2][1])/s; z = 0.25*s; }
+            const l = Math.sqrt(x*x+y*y+z*z+w*w)+1e-8; return [x/l, y/l, z/l, w/l];
+        }
+        
+        togglePlay() {
+            if (!this.currentAction) return;
+            if (this.isPlaying) { this.currentAction.paused = true; this.isPlaying = false; document.getElementById('hy-motion-play').textContent = '▶ Play'; }
+            else { this.currentAction.paused = false; this.currentAction.play(); this.isPlaying = true; document.getElementById('hy-motion-play').textContent = '⏸ Pause'; }
+        }
+        
+        // 🎬 自動再生 - モーション読み込み後に強制的に再生開始
+        autoPlay() {
+            if (!this.currentAction) {
+                console.warn('🎬 AutoPlay: currentAction が存在しません');
+                return;
+            }
+            console.log('🎬 AutoPlay: 強制再生開始 (isPlaying:', this.isPlaying, ')');
+            // 強制的にリセットして再生
+            this.isPlaying = false;
+            this.currentAction.stop();
+            this.currentAction.reset();
+            this.currentAction.paused = false;
+            this.currentAction.setEffectiveTimeScale(this.playbackSpeed);
+            this.currentAction.setEffectiveWeight(1.0);
+            this.currentAction.play();
+            this.isPlaying = true;
+            const playBtn = document.getElementById('hy-motion-play');
+            if (playBtn) playBtn.textContent = '⏸ Pause';
+            console.log('🎬 AutoPlay: 再生開始完了');
+        }
+        
+        stop() { if (this.currentAction) { this.currentAction.stop(); this.currentAction.reset(); } this.isPlaying = false; document.getElementById('hy-motion-play').textContent = '▶ Play'; }
+        
+        downloadVRMA() {
+            if (!this.lastVRMABlob) { alert('VRMAデータがありません'); return; }
+            const url = URL.createObjectURL(this.lastVRMABlob);
+            const a = document.createElement('a'); a.href = url; a.download = 'motion.vrma'; a.click(); URL.revokeObjectURL(url);
+        }
+        
+        startAnimationLoop() {
+            const update = () => {
+                requestAnimationFrame(update);
+                const delta = this.clock.getDelta();
+                if (this.currentMixer && this.isPlaying) this.currentMixer.update(delta);
+                if (this.app && this.app.vrm) this.app.vrm.update(delta);
+            };
+            update();
+        }
+        
+        loadScript(src) { return new Promise((res, rej) => { if (document.querySelector(`script[src="${src}"]`)) { res(); return; } const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); }); }
+    }
+    
+    function initHYMotion() {
+        if (window.app) { window.hyMotion = new HYMotionIntegration(window.app); }
+        else { const check = setInterval(() => { if (window.app) { window.hyMotion = new HYMotionIntegration(window.app); clearInterval(check); } }, 100); }
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(initHYMotion, 500));
+    else setTimeout(initHYMotion, 500);
+    </script>
+    
+    <!-- パネルUI管理（ドラッグ、折りたたみ） -->
+    <script src="./panel-ui-manager.js"></script>
+    
+    <!-- キャラクタープリセット機能 -->
+    <script>
+    (function() {
+        console.log('🎭 キャラクタープリセット機能初期化');
+        
+        // プリセット一覧を読み込んで表示
+        async function loadPresetList() {
+            const presetList = document.getElementById('preset-list');
+            if (!presetList) return;
+            
+            presetList.innerHTML = '<div style="color: #888; font-size: 11px; text-align: center; padding: 10px;">読み込み中...</div>';
+            
+            try {
+                const response = await fetch('/list-character-presets');
+                const data = await response.json();
+                
+                if (data.success && data.presets && data.presets.length > 0) {
+                    presetList.innerHTML = '';
+                    
+                    data.presets.forEach(preset => {
+                        const item = document.createElement('div');
+                        item.className = 'preset-item';
+                        item.style.cssText = 'background: white; border: 1px solid #e0e0e0; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 8px;';
+                        item.innerHTML = `
+                            <span style="font-size: 16px;">📄</span>
+                            <span style="flex: 1; font-size: 11px; font-weight: 600; color: #333;">${preset.title}</span>
+                            <span style="font-size: 10px; color: #888;">選択</span>
+                        `;
+                        
+                        // ホバーエフェクト
+                        item.addEventListener('mouseenter', () => {
+                            item.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                            item.style.color = 'white';
+                            item.style.borderColor = '#667eea';
+                            item.style.transform = 'translateX(3px)';
+                            item.querySelector('span:last-child').style.color = 'rgba(255,255,255,0.8)';
+                        });
+                        item.addEventListener('mouseleave', () => {
+                            item.style.background = 'white';
+                            item.style.color = '';
+                            item.style.borderColor = '#e0e0e0';
+                            item.style.transform = '';
+                            item.querySelector('span:last-child').style.color = '#888';
+                        });
+                        
+                        // クリックで内容を読み込み
+                        item.addEventListener('click', async () => {
+                            await loadPresetContent(preset.filename);
+                        });
+                        
+                        presetList.appendChild(item);
+                    });
+                    
+                    console.log(`✅ プリセット ${data.presets.length}件読み込み完了`);
+                } else {
+                    presetList.innerHTML = '<div style="color: #999; font-size: 11px; text-align: center; padding: 10px;">プリセットがありません<br><small style="color:#bbb;">Character\'s mental state フォルダに.txtファイルを追加</small></div>';
+                }
+            } catch (error) {
+                console.error('❌ プリセット読み込みエラー:', error);
+                presetList.innerHTML = '<div style="color: #ff6b6b; font-size: 11px; text-align: center; padding: 10px;">読み込みエラー<br><small>サーバーが起動しているか確認してください</small></div>';
+            }
+        }
+        
+        // プリセット内容を読み込んでtextareaにセット
+        async function loadPresetContent(filename) {
+            try {
+                const response = await fetch(`/get-character-preset?filename=${encodeURIComponent(filename)}`);
+                const data = await response.json();
+                
+                if (data.success && data.content) {
+                    const textarea = document.getElementById('character-prompt');
+                    if (textarea) {
+                        textarea.value = data.content;
+                        textarea.focus();
+                        console.log(`✅ プリセット適用: ${filename}`);
+                        
+                        // 成功アニメーション
+                        textarea.style.transition = 'box-shadow 0.3s';
+                        textarea.style.boxShadow = '0 0 10px rgba(102, 126, 234, 0.5)';
+                        setTimeout(() => {
+                            textarea.style.boxShadow = '';
+                        }, 500);
+                    }
+                } else {
+                    alert('プリセットの読み込みに失敗しました: ' + (data.error || '不明なエラー'));
+                }
+            } catch (error) {
+                console.error('❌ プリセット内容読み込みエラー:', error);
+                alert('プリセットの読み込みに失敗しました');
+            }
+        }
+        
+        // 性格設定モーダルが開いたときにプリセット一覧を読み込み
+        function setupModalObserver() {
+            const modal = document.getElementById('character-settings-modal');
+            if (!modal) {
+                setTimeout(setupModalObserver, 500);
+                return;
+            }
+            
+            // MutationObserverでモーダルの表示を監視
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach(mutation => {
+                    if (mutation.attributeName === 'style') {
+                        const display = modal.style.display;
+                        if (display === 'flex' || display === 'block') {
+                            console.log('🎭 性格設定モーダルが開いた - プリセット読み込み');
+                            loadPresetList();
+                        }
+                    }
+                });
+            });
+            
+            observer.observe(modal, { attributes: true });
+            console.log('✅ モーダル監視開始');
+        }
+        
+        // DOM読み込み後に初期化
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => setTimeout(setupModalObserver, 1000));
+        } else {
+            setTimeout(setupModalObserver, 1000);
+        }
+        
+        // グローバルに公開
+        window.CharacterPresets = {
+            loadList: loadPresetList,
+            loadContent: loadPresetContent
+        };
+    })();
+    </script>
+    
+    <!-- 🧹 モーションクリーンアップユーティリティ（レイヤー残留防止） -->
+    <script src="./motion-cleanup.js?v=1.0"></script>
+    
+    <!-- AI Chat Auto Motion System -->
+    <script src="./ai-chat-auto-motion.js?v=5.7.1"></script>
+    
+    <!-- ComfyUI HY-Motion Integration -->
+    <script src="./comfyui-hy-motion.js?v=7.5"></script>
+    
+    <!-- モーション一覧機能（外部ファイル） -->
+    <script type="module" src="./motion-list-manager.js"></script>
+    <script type="module" src="./eromotion-list-manager.js"></script>
+    
+    <!-- VMC Protocol Mocap -->
+    <script src="./vmc-mocap-v2.js"></script>
+    
+    <!-- 行動パネル（追跡・逃走・ランダム行動） -->
+    <script type="module" src="./behavior-panel.js"></script>
+    
+    <!-- 触るパネル（デコピン・つまむ） -->
+    <script type="module" src="./touch-panel.js"></script>
+    
+    <!-- Style-Bert-VITS2 音声合成パネル -->
+    <script src="./sbv2-panel.js?v=2.2"></script>
+    
+    <!-- 音声入力（マイク → テキスト → チャット） -->
+    <script>
+    console.log('=== 音声入力UI インラインスクリプト開始 ===');
+    
+    (function() {
+        let recognition = null;
+        let isListening = false;
+        let currentLang = 'ja-JP';
+        let autoSend = true;
+        
+        function initSpeechRecognition() {
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) { console.error('❌ Web Speech API非対応'); return false; }
+            
+            recognition = new SR();
+            recognition.lang = currentLang;
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            
+            recognition.onstart = () => {
+                console.log('🎙️ 音声認識開始');
+                isListening = true;
+                updateBtn();
+            };
+            
+            recognition.onend = () => {
+                console.log('🎙️ 音声認識終了');
+                isListening = false;
+                updateBtn();
+            };
+            
+            recognition.onresult = (e) => {
+                let final = '';
+                for (let i = e.resultIndex; i < e.results.length; i++) {
+                    if (e.results[i].isFinal) final += e.results[i][0].transcript;
+                }
+                const input = document.getElementById('chat-input');
+                if (input && final) {
+                    input.value = final.trim();
+                    console.log('🎙️ 認識:', final.trim());
+                    if (autoSend) setTimeout(() => document.getElementById('chat-send')?.click(), 200);
+                }
+            };
+            
+            recognition.onerror = (e) => {
+                console.error('🎙️ エラー:', e.error);
+                isListening = false;
+                updateBtn();
+            };
+            
+            return true;
+        }
+        
+        function toggle() {
+            if (!recognition && !initSpeechRecognition()) {
+                alert('このブラウザは音声入力に対応していません');
+                return;
+            }
+            if (isListening) recognition.stop();
+            else { recognition.lang = currentLang; recognition.start(); }
+        }
+        
+        function updateBtn() {
+            const btn = document.getElementById('voice-input-btn');
+            if (!btn) return;
+            if (isListening) {
+                btn.style.background = '#ff6b6b';
+                btn.textContent = '🔴';
+                btn.title = '音声認識中... クリックで停止';
+            } else {
+                btn.style.background = '#4ecdc4';
+                btn.textContent = '🎙️';
+                btn.title = '音声入力を開始';
+            }
+        }
+        
+        function createUI() {
+            if (document.getElementById('voice-input-btn')) return;
+            
+            const container = document.querySelector('.chat-input-container');
+            if (!container) {
+                console.log('🎙️ chat-input-container待機中...');
+                setTimeout(createUI, 500);
+                return;
+            }
+            
+            const btn = document.createElement('button');
+            btn.id = 'voice-input-btn';
+            btn.textContent = '🎙️';
+            btn.title = '音声入力を開始';
+            btn.style.cssText = 'padding:6px 10px;background:#4ecdc4;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;margin-left:4px;';
+            btn.onclick = toggle;
+            
+            const send = document.getElementById('chat-send');
+            if (send) send.parentNode.insertBefore(btn, send.nextSibling);
+            else container.appendChild(btn);
+            
+            console.log('✅ 音声入力ボタン追加完了');
+            
+            // 設定パネル
+            const vs = document.querySelector('.voice-settings');
+            if (vs && !document.getElementById('voice-input-settings')) {
+                const div = document.createElement('div');
+                div.id = 'voice-input-settings';
+                div.innerHTML = `
+                    <div style="margin-top:15px;padding:10px;background:linear-gradient(135deg,rgba(78,205,196,0.15),rgba(68,160,141,0.15));border-radius:8px;border:1px solid rgba(78,205,196,0.4);">
+                        <div style="font-size:12px;font-weight:bold;color:#4ecdc4;margin-bottom:8px;">🎙️ 音声入力設定</div>
+                        <div style="margin-bottom:8px;">
+                            <label style="font-size:10px;color:#666;display:block;margin-bottom:4px;">認識言語:</label>
+                            <select id="voice-input-lang" style="width:100%;padding:6px;border:1px solid #4ecdc4;border-radius:4px;font-size:11px;">
+                                <option value="ja-JP" selected>🇯🇵 日本語</option>
+                                <option value="en-US">🇺🇸 English</option>
+                                <option value="zh-CN">🇨🇳 中文</option>
+                                <option value="ko-KR">🇰🇷 한국어</option>
+                            </select>
+                        </div>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:#666;cursor:pointer;">
+                            <input type="checkbox" id="voice-input-auto" checked style="accent-color:#4ecdc4;">
+                            認識後に自動送信
+                        </label>
+                        <div style="font-size:9px;color:#888;margin-top:8px;">💡 チャット入力欄の🎙️ボタンで音声入力開始</div>
+                    </div>
+                `;
+                vs.appendChild(div);
+                
+                document.getElementById('voice-input-lang')?.addEventListener('change', (e) => {
+                    currentLang = e.target.value;
+                    console.log('🎙️ 言語変更:', currentLang);
+                });
+                
+                document.getElementById('voice-input-auto')?.addEventListener('change', (e) => {
+                    autoSend = e.target.checked;
+                    console.log('🎙️ 自動送信:', autoSend);
+                });
+            }
+        }
+        
+        setTimeout(createUI, 2000);
+        setTimeout(createUI, 4000);
+        window.addEventListener('load', () => setTimeout(createUI, 3000));
+        
+        window.VoiceInput = { toggle, start: () => { if(!isListening) toggle(); }, stop: () => { if(isListening) recognition?.stop(); } };
+        
+        console.log('✅ 音声入力システム準備完了');
+    })();
+    </script>
+    
+    <!-- 画面キャプチャチャットシステム v1.7 -->
+    <script src="screen-capture-chat.js?v=1.7"></script>
+    
+    <!-- プリセット保存機能 -->
+    <script>
+    (function() {
+        console.log('💾 プリセット保存機能初期化中...');
+        
+        function setupPresetSave() {
+            const saveBtn = document.getElementById('save-preset-btn');
+            const nameInput = document.getElementById('preset-name-input');
+            const promptTextarea = document.getElementById('character-prompt');
+            
+            if (!saveBtn || !nameInput || !promptTextarea) {
+                setTimeout(setupPresetSave, 500);
+                return;
+            }
+            
+            saveBtn.addEventListener('click', async () => {
+                const name = nameInput.value.trim();
+                const content = promptTextarea.value.trim();
+                
+                if (!name) {
+                    alert('プリセット名を入力してください');
+                    nameInput.focus();
+                    return;
+                }
+                
+                if (!content) {
+                    alert('性格設定の内容を入力してください');
+                    promptTextarea.focus();
+                    return;
+                }
+                
+                try {
+                    saveBtn.disabled = true;
+                    saveBtn.textContent = '保存中...';
+                    
+                    const response = await fetch('/save-character-preset', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name, content })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        alert(`✅ ${result.message}`);
+                        nameInput.value = '';
+                        
+                        // プリセット一覧を更新
+                        if (window.loadCharacterPresets) {
+                            window.loadCharacterPresets();
+                        }
+                    } else {
+                        alert(`❌ 保存失敗: ${result.error}`);
+                    }
+                } catch (err) {
+                    console.error('プリセット保存エラー:', err);
+                    alert('❌ 保存に失敗しました');
+                } finally {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = '💾 保存';
+                }
+            });
+            
+            console.log('✅ プリセット保存ボタンセットアップ完了');
+        }
+        
+        // プリセット一覧読み込み関数（グローバルに公開）
+        window.loadCharacterPresets = async function() {
+            const presetList = document.getElementById('preset-list');
+            if (!presetList) return;
+            
+            try {
+                const response = await fetch('/list-character-presets');
+                const result = await response.json();
+                
+                if (result.success && result.presets.length > 0) {
+                    presetList.innerHTML = result.presets.map(p => `
+                        <div class="preset-item" data-filename="${p.filename}" style="padding:8px 10px;background:#f8f9fa;border:1px solid #e0e0e0;border-radius:6px;margin-bottom:4px;cursor:pointer;font-size:11px;transition:all 0.2s;">
+                            🎭 ${p.title}
+                        </div>
+                    `).join('');
+                    
+                    // クリックイベント
+                    presetList.querySelectorAll('.preset-item').forEach(item => {
+                        item.addEventListener('click', async () => {
+                            const filename = item.dataset.filename;
+                            try {
+                                const res = await fetch(`/get-character-preset?filename=${encodeURIComponent(filename)}`);
+                                const data = await res.json();
+                                if (data.success) {
+                                    document.getElementById('character-prompt').value = data.content;
+                                    console.log('🎭 プリセット読み込み:', filename);
+                                }
+                            } catch (e) {
+                                console.error('プリセット読み込みエラー:', e);
+                            }
+                        });
+                        
+                        // ホバーエフェクト
+                        item.addEventListener('mouseenter', () => {
+                            item.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                            item.style.color = 'white';
+                        });
+                        item.addEventListener('mouseleave', () => {
+                            item.style.background = '#f8f9fa';
+                            item.style.color = 'inherit';
+                        });
+                    });
+                } else {
+                    presetList.innerHTML = '<div style="color:#888;font-size:11px;text-align:center;padding:10px;">プリセットがありません</div>';
+                }
+            } catch (e) {
+                console.error('プリセット一覧読み込みエラー:', e);
+                presetList.innerHTML = '<div style="color:#ff6b6b;font-size:11px;text-align:center;padding:10px;">読み込みエラー</div>';
+            }
+        };
+        
+        // モーダル開く時にプリセット一覧を読み込み
+        const characterSettingsBtn = document.getElementById('character-settings-btn');
+        if (characterSettingsBtn) {
+            characterSettingsBtn.addEventListener('click', () => {
+                setTimeout(window.loadCharacterPresets, 100);
+            });
+        }
+        
+        setTimeout(setupPresetSave, 1000);
+        
+        console.log('💾 プリセット保存機能準備完了');
+    })();
+    </script>
+    
+    <!-- 性格設定モーダル閉じるボタン強化 -->
+    <script>
+    (function() {
+        console.log('🎭 性格設定モーダル閉じる機能初期化...');
+        
+        function closeCharacterModal() {
+            const modal = document.getElementById('character-settings-modal');
+            if (modal) {
+                modal.style.display = 'none';
+                console.log('✅ 性格設定モーダルを閉じました');
+            }
+        }
+        
+        function setupCloseHandlers() {
+            const modal = document.getElementById('character-settings-modal');
+            const closeBtn = document.getElementById('close-character-modal-btn');
+            const cancelBtn = document.getElementById('cancel-character-btn');
+            
+            if (!modal) {
+                console.log('⏳ モーダル待機中...');
+                setTimeout(setupCloseHandlers, 500);
+                return;
+            }
+            
+            // Xボタンクリック
+            if (closeBtn) {
+                closeBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeCharacterModal();
+                });
+                // ホバー効果
+                closeBtn.addEventListener('mouseenter', () => {
+                    closeBtn.style.background = '#ee5a5a';
+                    closeBtn.style.transform = 'scale(1.1)';
+                });
+                closeBtn.addEventListener('mouseleave', () => {
+                    closeBtn.style.background = '#ff6b6b';
+                    closeBtn.style.transform = 'scale(1)';
+                });
+                console.log('✅ Xボタンイベント設定完了');
+            }
+            
+            // キャンセルボタンクリック（二重登録を避ける）
+            if (cancelBtn && !cancelBtn.dataset.closeHandlerSet) {
+                cancelBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeCharacterModal();
+                });
+                cancelBtn.dataset.closeHandlerSet = 'true';
+                console.log('✅ キャンセルボタンイベント設定完了');
+            }
+            
+            // モーダル背景クリックで閉じる
+            if (!modal.dataset.bgClickHandlerSet) {
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        closeCharacterModal();
+                    }
+                });
+                modal.dataset.bgClickHandlerSet = 'true';
+                console.log('✅ 背景クリックイベント設定完了');
+            }
+            
+            // Escapeキーで閉じる
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && modal.style.display === 'flex') {
+                    closeCharacterModal();
+                }
+            });
+            
+            console.log('✅ 性格設定モーダル閉じる機能準備完了');
+        }
+        
+        // グローバルに公開
+        window.closeCharacterModal = closeCharacterModal;
+        
+        // DOM読み込み後に初期化
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => setTimeout(setupCloseHandlers, 1000));
+        } else {
+            setTimeout(setupCloseHandlers, 1000);
+        }
+        
+        // 追加の遅延実行（確実性のため）
+        setTimeout(setupCloseHandlers, 2000);
+        setTimeout(setupCloseHandlers, 3000);
+    })();
+    </script>
+    
+    <!-- 🎵 AI音楽生成パネル -->
+    <script src="music-generator-panel.js"></script>
+    
+    <!-- 🎵 ローカル音楽BGMパネル -->
+    <script src="local-music-panel.js"></script>
+    
+    <!-- 🔮 BGMパイプライン先読みシンクロシステム (会話自動BGM先読み生成モード) -->
+    <script src="local-music-pipeline-prefetch.js?v=1.0"></script>
+    
+    <!-- 🎵 BGMシーン分析システム -->
+    <script src="bgm-scene-analyzer.js"></script>
+    
+    <!-- 🚀 初期設定記憶システム -->
+    <script src="startup-settings.js"></script>
+    
+    <!-- 🌍 AI背景生成パネル -->
+    <script src="ai-background-generator.js"></script>
+    
+    <!-- 🔮 AI背景パイプライン先読み生成システム (会話自動背景先読み生成モード) -->
+    <script src="ai-background-pipeline-prefetch.js?v=1.0"></script>
+    
+    <!-- 🎬 自動カメラワークシステム -->
+    <script src="auto-camera-system.js"></script>
+    
+    <!-- 🎬 AI演出カメラシステム V2.3 (4人対応・話者追従) -->
+    <script src="ai-director-camera-v23.js?v=2.3"></script>
+    
+    <!-- 🎬 AI監督システム (Story Supervisor) -->
+    <script src="story-supervisor.js"></script>
+    
+    <!-- 📹 カメラエフェクト & 演出パネル -->
+    <script src="camera-effects-panel.js?v=1.3"></script>
+    
+    <!-- 🎯 DOF (被写界深度) システム -->
+    <script src="dof-system.js?v=1.0"></script>
+    
+    <!-- 🌟 カメラエフェクト拡張 (追加プリセット・特殊効果) -->
+    <script src="camera-effects-extended.js?v=1.0"></script>
+    
+    <!-- 🎬 AI演出監督システム (Cinematographer) -->
+    <script src="ai-cinematographer.js?v=1.0"></script>
+    
+    <!-- 🎬 シネマティックプリセット演出システム -->
+    <script src="ai-cinematic-presets.js?v=1.0"></script>
+    
+    <!-- 🎭 マルチキャラクター会話システム -->
+    <script src="multi-character/character-personality-presets.js?v=1.2"></script>
+    <script src="multi-character/character-personality-editor-ui.js?v=1.7.2"></script>
+    <script src="multi-character/core.js?v=2.4"></script>
+    <script src="multi-character/camera-multi-patch.js?v=1.1"></script>
+    <script src="multi-character/pipelined-dialogue-director.js?v=4.8"></script>
+    <script src="multi-character/conversation-supervisor.js?v=2.5"></script>
+    <script src="multi-character/standalone.js?v=4.7"></script>
+    <script src="multi-character/auto-placement.js?v=1.1"></script>
+    <script src="multi-character/config-manager.js?v=1.0"></script>
+    <script src="multi-character/pipeline-monitor.js?v=1.0"></script>
+    <script src="multi-character/subtitle-display.js?v=1.1"></script>
+    
+    <!-- ✨ 空間エフェクトシステム -->
+    <script src="spatial-effects.js?v=1.3"></script>
+    
+    <!-- 👤 ユーザー割り込み参加システム v2.4 (発言予約機能) -->
+    <!-- 🚶 マルチキャラクター行動制御システム -->
+    <script type="module" src="multi-character/character-behavior.js?v=1.0"></script>
+    
+    <script src="multi-character/user-participation.js?v=2.4"></script>
+    
+    <!-- 💭 想像ワイプシステム (Gemini画像生成) -->
+    <script src="imagination-wipe.js?v=3.7"></script>
+    
+    <!-- 🎭 VRMモデルUI表示切替 (Shift+V) -->
+    <script src="vrm-model-ui-toggle.js?v=1.0"></script>
+    
+    <!-- 🎮 物理演算UIトグルボタン (Shift+B) -->
+    <script src="physics-ui-toggle.js?v=1.0"></script>
+    
+    <!-- 📺 主観ワイプUIシステム (FPSカメラを別ウィンドウ表示) -->
+    <script src="fps-wipe-view.js?v=3.0"></script>
+    
+    <!-- 🎥 画面録画システム (Shift+P開始 / Shift+O停止) -->
+    <script src="screen-recorder.js?v=1.2"></script>
+    
+    <!-- 💾 自動画像保存システム (想像ワイプ・360背景・3Dモデル) -->
+    <script src="auto-image-saver.js?v=1.0"></script>
+    
+    <!-- 👗🦴 VRMボディコントロール (Shift+D: 服の着脱・体型調整・Grok Voice Function Calling) -->
+    <script src="vrm-body-control.js?v=1.0"></script>
+    <script src="grok-extended-tools.js?v=1.3.2"></script>
+    <script src="grok-vision-bridge.js?v=2.5"></script>
+
+    <!-- ⌨️ キーボードショートカット管理 (Shift+M: マルチキャラモード) -->
+    <script src="keyboard-shortcuts.js?v=1.0"></script>
+    
+    <!-- 📋 UI管理パネル (Shift+U) -->
+    <script src="ui-manager-panel.js?v=2.10"></script>
+    
+    <!-- 🧠 感情・記憶管理システム (Shift+E) -->
+    <script src="emotion-memory/emotion-memory-ui.js?v=1.0"></script>
+    <script src="emotion-memory/grok-voice-integration.js?v=1.1"></script>
+    
+    <!-- 🎭 AI BBS システム (30人AIエージェントBBS) -->
+    <script src="ai-bbs/bbs-agents.js?v=1.7"></script>
+    <script src="ai-bbs/bbs-panel.js?v=1.8"></script>
+    <script>
+        // AI BBS 初期化（即時実行）
+        (function() {
+            if (typeof BBSAgentManager !== 'undefined' && typeof BBSPanel !== 'undefined') {
+                window.bbsAgentManager = new BBSAgentManager();
+                window.bbsPanel = new BBSPanel(window.bbsAgentManager);
+                console.log('🎭 AI BBS システム初期化完了');
+            }
+        })();
+    </script>
+    <!-- 🏠 3D環境マネージャー (Shift+G) - FBX/GLBオブジェクト配置・プリセット保存 -->
+    <script src="environment-3d-manager.js?v=2.0"></script>
+
+    <!-- 🖥️ Screen TV - 3D空間内TV画面 (Screen Capture API) -->
+    <script src="screen-tv.js?v=1.0"></script>
+    <script src="screen-3d-controls.js?v=1.0"></script>
+
+    <!-- 🔒 Grok Voice ツール制限UI -->
+    <script src="grok-tool-restrictions.js?v=1.0"></script>
+</body>
+</html>

@@ -1,0 +1,1621 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎬 VRMA Motion Editor Pro</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            overflow: hidden;
+        }
+        
+        #app { display: flex; height: 100vh; }
+        
+        #viewer-container { flex: 1; position: relative; }
+        #canvas-container { width: 100%; height: 100%; cursor: default; }
+        #canvas-container.grabbing { cursor: grabbing; }
+        
+        #right-panel {
+            width: 320px;
+            background: rgba(30, 30, 50, 0.95);
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        
+        .panel-header {
+            padding: 12px 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-size: 16px;
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .panel-section {
+            padding: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .panel-section h3 {
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .file-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+        
+        .btn {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .btn-success { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; }
+        .btn-warning { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; }
+        .btn:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(0,0,0,0.3); }
+        .btn-small { padding: 5px 8px; font-size: 11px; }
+        
+        #bone-list {
+            max-height: 200px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 6px;
+            padding: 8px;
+        }
+        
+        .bone-item {
+            padding: 6px 10px;
+            cursor: pointer;
+            border-radius: 4px;
+            margin-bottom: 2px;
+            transition: background 0.2s;
+            font-size: 11px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .bone-item:hover { background: rgba(102, 126, 234, 0.3); }
+        .bone-item.selected { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .bone-item.has-edit { border-left: 3px solid #38ef7d; }
+        
+        .bone-item .edit-count {
+            background: #38ef7d;
+            color: #000;
+            padding: 1px 5px;
+            border-radius: 8px;
+            font-size: 9px;
+            font-weight: bold;
+        }
+        
+        .rotation-display { display: flex; gap: 8px; margin-bottom: 8px; }
+        
+        .rotation-value-box {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 8px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .rotation-value-box .axis { font-size: 10px; font-weight: bold; margin-bottom: 4px; }
+        .rotation-value-box.x .axis { color: #ff6b6b; }
+        .rotation-value-box.y .axis { color: #4ecdc4; }
+        .rotation-value-box.z .axis { color: #45b7d1; }
+        .rotation-value-box .value { font-size: 16px; font-family: monospace; }
+        
+        .help-box {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 10px;
+            line-height: 1.6;
+        }
+        
+        .help-box kbd {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        
+        #timeline-container {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 320px;
+            height: 130px;
+            background: rgba(30, 30, 50, 0.98);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 10px 15px;
+        }
+        
+        .timeline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .timeline-info { font-size: 12px; color: #aaa; }
+        .timeline-info span { color: #667eea; font-weight: bold; }
+        
+        .playback-controls { display: flex; gap: 6px; }
+        
+        .playback-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .playback-btn:hover { background: #667eea; }
+        .playback-btn.active { background: #38ef7d; color: #000; }
+        
+        #timeline-track-container { position: relative; height: 60px; }
+        
+        #timeline-track {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 15px;
+            height: 30px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        #timeline-progress {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            background: linear-gradient(90deg, rgba(102, 126, 234, 0.3) 0%, rgba(118, 75, 162, 0.3) 100%);
+            pointer-events: none;
+            border-radius: 4px 0 0 4px;
+        }
+        
+        #timeline-scrubber {
+            position: absolute;
+            top: 5px;
+            width: 2px;
+            height: 50px;
+            background: #667eea;
+            cursor: ew-resize;
+            z-index: 20;
+        }
+        
+        #timeline-scrubber::before {
+            content: '';
+            position: absolute;
+            top: -8px;
+            left: -7px;
+            width: 16px;
+            height: 16px;
+            background: #667eea;
+            border-radius: 50%;
+            border: 2px solid white;
+        }
+        
+        .keyframe-marker {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 14px;
+            height: 14px;
+            background: #38ef7d;
+            border: 2px solid white;
+            border-radius: 3px;
+            cursor: pointer;
+            z-index: 10;
+            transition: all 0.1s;
+        }
+        
+        .keyframe-marker:hover {
+            transform: translate(-50%, -50%) scale(1.3);
+            box-shadow: 0 0 10px #38ef7d;
+        }
+        
+        .keyframe-marker.selected { background: #f5576c; box-shadow: 0 0 10px #f5576c; }
+        .keyframe-marker.selected-bone { background: #ff6b6b; }
+        .keyframe-marker.other-bone { opacity: 0.4; width: 10px; height: 10px; }
+        .keyframe-marker.dragging { opacity: 0.7; z-index: 100; }
+        
+        #timeline-ruler {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 0;
+            height: 14px;
+            font-size: 9px;
+            color: #666;
+        }
+        
+        .ruler-mark {
+            position: absolute;
+            text-align: center;
+            transform: translateX(-50%);
+        }
+        
+        #drop-zone {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(102, 126, 234, 0.9);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            font-size: 24px;
+        }
+        
+        #drop-zone.active { display: flex; }
+        
+        #info-overlay {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 12px 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            z-index: 100;
+        }
+        
+        #info-overlay h4 { color: #667eea; margin-bottom: 6px; font-size: 14px; }
+        
+        #bone-highlight-info {
+            position: fixed;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(102, 126, 234, 0.9);
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 100;
+            display: none;
+            pointer-events: none;
+        }
+        
+        #gizmo-info {
+            position: fixed;
+            bottom: 150px;
+            left: 15px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            z-index: 100;
+            display: none;
+        }
+        
+        #gizmo-info .axis-indicator { font-size: 18px; font-weight: bold; margin-right: 10px; }
+        #gizmo-info .axis-indicator.x { color: #ff6b6b; }
+        #gizmo-info .axis-indicator.y { color: #4ecdc4; }
+        #gizmo-info .axis-indicator.z { color: #45b7d1; }
+        
+        #copy-notification {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(56, 239, 125, 0.9);
+            color: #000;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            z-index: 1000;
+            display: none;
+        }
+        
+        .hidden-input { display: none; }
+        
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 25px 40px;
+            border-radius: 12px;
+            z-index: 2000;
+            text-align: center;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-left-color: #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }
+        
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        #layer-list { max-height: 120px; overflow-y: auto; }
+        
+        .layer-item {
+            display: flex;
+            align-items: center;
+            padding: 6px 8px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            margin-bottom: 4px;
+            font-size: 11px;
+        }
+        
+        .layer-name { flex: 1; }
+        .layer-frames { color: #888; font-size: 9px; margin-right: 8px; }
+        .layer-delete { background: none; border: none; color: #f5576c; cursor: pointer; font-size: 14px; padding: 2px; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div id="viewer-container">
+            <div id="canvas-container"></div>
+        </div>
+        
+        <div id="right-panel">
+            <div class="panel-header">🎬 VRMA Motion Editor Pro</div>
+            
+            <div class="panel-section">
+                <h3>📁 ファイル</h3>
+                <div class="file-buttons">
+                    <button class="btn btn-primary btn-small" id="load-vrm-btn">👤 VRM</button>
+                    <button class="btn btn-primary btn-small" id="load-vrma-btn">🎬 VRMA</button>
+                    <button class="btn btn-success btn-small" id="export-vrma-btn">💾 出力</button>
+                </div>
+                <input type="file" id="vrm-input" class="hidden-input" accept=".vrm">
+                <input type="file" id="vrma-input" class="hidden-input" accept=".vrma">
+            </div>
+            
+            <div class="panel-section">
+                <h3>🦴 ボーン (<span id="selected-bone-name">未選択</span>)</h3>
+                <div id="bone-list"></div>
+            </div>
+            
+            <div class="panel-section">
+                <h3>🔄 回転オフセット</h3>
+                <div class="rotation-display">
+                    <div class="rotation-value-box x">
+                        <div class="axis">X</div>
+                        <div class="value" id="rot-x-display">0°</div>
+                    </div>
+                    <div class="rotation-value-box y">
+                        <div class="axis">Y</div>
+                        <div class="value" id="rot-y-display">0°</div>
+                    </div>
+                    <div class="rotation-value-box z">
+                        <div class="axis">Z</div>
+                        <div class="value" id="rot-z-display">0°</div>
+                    </div>
+                </div>
+                <div class="file-buttons">
+                    <button class="btn btn-success btn-small" id="add-keyframe-btn">⬇️ キーフレーム追加</button>
+                    <button class="btn btn-warning btn-small" id="reset-rotation-btn">↩️ リセット</button>
+                </div>
+            </div>
+            
+            <div class="panel-section">
+                <h3>⌨️ 操作方法</h3>
+                <div class="help-box">
+                    <div><kbd>右クリック</kbd>: ボーン選択</div>
+                    <div><kbd>ホイール</kbd>: X軸回転</div>
+                    <div><kbd>Shift</kbd>+<kbd>ホイール</kbd>: Y軸回転</div>
+                    <div><kbd>Ctrl</kbd>+<kbd>ホイール</kbd>: Z軸回転</div>
+                    <div><kbd>ホイールクリック</kbd>: キーフレーム追加</div>
+                    <div><kbd>Del</kbd>: 選択キーフレーム削除</div>
+                    <div><kbd>Ctrl+C</kbd>/<kbd>V</kbd>: コピー/ペースト</div>
+                </div>
+            </div>
+            
+            <div class="panel-section">
+                <h3>📚 編集 (<span id="edit-count">0</span>件)</h3>
+                <div id="layer-list">
+                    <p style="color: #666; font-size: 11px;">キーフレームを追加すると表示</p>
+                </div>
+                <button class="btn btn-warning btn-small" id="clear-all-btn" style="margin-top:8px; width:100%;">🗑️ 全クリア</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="timeline-container">
+        <div class="timeline-header">
+            <div class="timeline-info">
+                Frame: <span id="current-frame">0</span> / <span id="total-frames">0</span>
+                &nbsp;|&nbsp;
+                <span id="current-time">0.00</span>s / <span id="total-time">0.00</span>s
+            </div>
+            <div class="playback-controls">
+                <button class="playback-btn" id="goto-start-btn">⏮</button>
+                <button class="playback-btn" id="prev-frame-btn">◀</button>
+                <button class="playback-btn" id="play-btn">▶</button>
+                <button class="playback-btn" id="next-frame-btn">▶</button>
+                <button class="playback-btn" id="goto-end-btn">⏭</button>
+                <button class="playback-btn active" id="loop-btn">🔁</button>
+            </div>
+        </div>
+        <div id="timeline-track-container">
+            <div id="timeline-ruler"></div>
+            <div id="timeline-track">
+                <div id="timeline-progress"></div>
+            </div>
+            <div id="timeline-scrubber" style="left: 0;"></div>
+        </div>
+    </div>
+    
+    <div id="drop-zone">📁 VRM / VRMA ファイルをドロップ</div>
+    
+    <div id="info-overlay">
+        <h4>🎬 VRMA Editor</h4>
+        <div>VRM: <span id="vrm-name">-</span></div>
+        <div>VRMA: <span id="vrma-name">-</span></div>
+    </div>
+    
+    <div id="bone-highlight-info"></div>
+    <div id="gizmo-info">
+        <span class="axis-indicator x">X</span>
+        <span>軸で回転中...</span>
+    </div>
+    <div id="copy-notification">📋 コピーしました!</div>
+    
+    <div id="loading" style="display: none;">
+        <div class="spinner"></div>
+        <div>読み込み中...</div>
+    </div>
+    
+    <div id="version-info" style="position: fixed; bottom: 10px; right: 330px; background: rgba(102, 126, 234, 0.9); color: white; padding: 5px 12px; border-radius: 12px; font-size: 12px; font-weight: bold; z-index: 100;">v6</div>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/",
+            "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.0.0/lib/three-vrm.module.min.js",
+            "@pixiv/three-vrm-animation": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@3.0.0/lib/three-vrm-animation.module.min.js"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+        import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+        import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
+        
+        class VRMAMotionEditorPro {
+            constructor() {
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.controls = null;
+                this.clock = new THREE.Clock();
+                this.raycaster = new THREE.Raycaster();
+                this.mouse = new THREE.Vector2();
+                
+                this.vrm = null;
+                this.mixer = null;
+                this.currentAction = null;
+                
+                this.vrmAnimation = null;
+                this.originalClip = null;
+                
+                this.currentFrame = 0;
+                this.totalFrames = 0;
+                this.fps = 30;
+                this.duration = 0;
+                this.isPlaying = false;
+                this.isLooping = true;
+                this.playbackTime = 0;
+                
+                this.editLayers = {};
+                this.selectedBone = null;
+                this.currentRotation = { x: 0, y: 0, z: 0 };
+                
+                this.hoveredBone = null;
+                this.isDraggingBone = false;
+                this.dragStartPos = { x: 0, y: 0 };
+                this.dragAxis = 'x';
+                this.boneSpheres = {};
+                
+                this.selectedKeyframe = null;
+                this.isDraggingKeyframe = false;
+                this.clipboard = null;
+                
+                // 全VRMボーン（指を含む）
+                this.humanoidBones = [
+                    { name: 'hips', label: '腰' },
+                    { name: 'spine', label: '背骨' },
+                    { name: 'chest', label: '胸' },
+                    { name: 'upperChest', label: '上胸' },
+                    { name: 'neck', label: '首' },
+                    { name: 'head', label: '頭' },
+                    { name: 'leftShoulder', label: '左肩' },
+                    { name: 'leftUpperArm', label: '左上腕' },
+                    { name: 'leftLowerArm', label: '左前腕' },
+                    { name: 'leftHand', label: '左手' },
+                    { name: 'rightShoulder', label: '右肩' },
+                    { name: 'rightUpperArm', label: '右上腕' },
+                    { name: 'rightLowerArm', label: '右前腕' },
+                    { name: 'rightHand', label: '右手' },
+                    { name: 'leftUpperLeg', label: '左太もも' },
+                    { name: 'leftLowerLeg', label: '左すね' },
+                    { name: 'leftFoot', label: '左足' },
+                    { name: 'leftToes', label: '左つま先' },
+                    { name: 'rightUpperLeg', label: '右太もも' },
+                    { name: 'rightLowerLeg', label: '右すね' },
+                    { name: 'rightFoot', label: '右足' },
+                    { name: 'rightToes', label: '右つま先' },
+                    // 左手指
+                    { name: 'leftThumbMetacarpal', label: '左親指1' },
+                    { name: 'leftThumbProximal', label: '左親指2' },
+                    { name: 'leftThumbDistal', label: '左親指3' },
+                    { name: 'leftIndexProximal', label: '左人差し指1' },
+                    { name: 'leftIndexIntermediate', label: '左人差し指2' },
+                    { name: 'leftIndexDistal', label: '左人差し指3' },
+                    { name: 'leftMiddleProximal', label: '左中指1' },
+                    { name: 'leftMiddleIntermediate', label: '左中指2' },
+                    { name: 'leftMiddleDistal', label: '左中指3' },
+                    { name: 'leftRingProximal', label: '左薬指1' },
+                    { name: 'leftRingIntermediate', label: '左薬指2' },
+                    { name: 'leftRingDistal', label: '左薬指3' },
+                    { name: 'leftLittleProximal', label: '左小指1' },
+                    { name: 'leftLittleIntermediate', label: '左小指2' },
+                    { name: 'leftLittleDistal', label: '左小指3' },
+                    // 右手指
+                    { name: 'rightThumbMetacarpal', label: '右親指1' },
+                    { name: 'rightThumbProximal', label: '右親指2' },
+                    { name: 'rightThumbDistal', label: '右親指3' },
+                    { name: 'rightIndexProximal', label: '右人差し指1' },
+                    { name: 'rightIndexIntermediate', label: '右人差し指2' },
+                    { name: 'rightIndexDistal', label: '右人差し指3' },
+                    { name: 'rightMiddleProximal', label: '右中指1' },
+                    { name: 'rightMiddleIntermediate', label: '右中指2' },
+                    { name: 'rightMiddleDistal', label: '右中指3' },
+                    { name: 'rightRingProximal', label: '右薬指1' },
+                    { name: 'rightRingIntermediate', label: '右薬指2' },
+                    { name: 'rightRingDistal', label: '右薬指3' },
+                    { name: 'rightLittleProximal', label: '右小指1' },
+                    { name: 'rightLittleIntermediate', label: '右小指2' },
+                    { name: 'rightLittleDistal', label: '右小指3' },
+                ];
+                
+                this.init();
+            }
+            
+            init() {
+                this.setupScene();
+                this.setupLights();
+                this.setupBoneList();
+                this.setupEventListeners();
+                this.setupKeyboardShortcuts();
+                this.animate();
+                console.log('🎬 VRMA Motion Editor Pro 初期化完了');
+            }
+            
+            setupScene() {
+                const container = document.getElementById('canvas-container');
+                
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x1a1a2e);
+                
+                this.camera = new THREE.PerspectiveCamera(35, container.clientWidth / (window.innerHeight - 130), 0.1, 1000);
+                this.camera.position.set(0, 1.3, 3);
+                
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                this.renderer.setSize(container.clientWidth, window.innerHeight - 130);
+                container.appendChild(this.renderer.domElement);
+                
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.target.set(0, 1.0, 0);
+                this.controls.enableDamping = true;
+                this.controls.update();
+                
+                this.scene.add(new THREE.GridHelper(10, 10, 0x444444, 0x222222));
+                
+                window.addEventListener('resize', () => this.onResize());
+            }
+            
+            setupLights() {
+                this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+                const dir = new THREE.DirectionalLight(0xffffff, 1);
+                dir.position.set(5, 10, 7.5);
+                this.scene.add(dir);
+                const fill = new THREE.DirectionalLight(0xffffff, 0.3);
+                fill.position.set(-5, 5, -5);
+                this.scene.add(fill);
+            }
+            
+            setupBoneList() {
+                const container = document.getElementById('bone-list');
+                container.innerHTML = this.humanoidBones.map(bone => `
+                    <div class="bone-item" data-bone="${bone.name}">
+                        <span>${bone.label}</span>
+                        <span class="edit-count" style="display:none;">0</span>
+                    </div>
+                `).join('');
+            }
+            
+            setupEventListeners() {
+                const canvas = this.renderer.domElement;
+                
+                document.getElementById('load-vrm-btn').onclick = () => document.getElementById('vrm-input').click();
+                document.getElementById('load-vrma-btn').onclick = () => document.getElementById('vrma-input').click();
+                document.getElementById('vrm-input').onchange = (e) => e.target.files[0] && this.loadVRM(e.target.files[0]);
+                document.getElementById('vrma-input').onchange = (e) => e.target.files[0] && this.loadVRMA(e.target.files[0]);
+                document.getElementById('export-vrma-btn').onclick = () => this.exportVRMA();
+                
+                document.getElementById('bone-list').onclick = (e) => {
+                    const item = e.target.closest('.bone-item');
+                    if (item) this.selectBone(item.dataset.bone);
+                };
+                
+                document.getElementById('add-keyframe-btn').onclick = () => this.addKeyframe();
+                document.getElementById('reset-rotation-btn').onclick = () => this.resetRotation();
+                document.getElementById('clear-all-btn').onclick = () => {
+                    if (confirm('全ての編集をクリアしますか？')) {
+                        this.editLayers = {};
+                        this.updateAllUI();
+                        this.applyFrame(this.currentFrame);
+                    }
+                };
+                
+                document.getElementById('play-btn').onclick = () => this.togglePlayback();
+                document.getElementById('prev-frame-btn').onclick = () => this.goToFrame(this.currentFrame - 1);
+                document.getElementById('next-frame-btn').onclick = () => this.goToFrame(this.currentFrame + 1);
+                document.getElementById('goto-start-btn').onclick = () => this.goToFrame(0);
+                document.getElementById('goto-end-btn').onclick = () => this.goToFrame(this.totalFrames - 1);
+                document.getElementById('loop-btn').onclick = () => this.toggleLoop();
+                
+                const track = document.getElementById('timeline-track');
+                let isScrubbing = false;
+                
+                track.onmousedown = (e) => {
+                    if (e.target.classList.contains('keyframe-marker')) return;
+                    isScrubbing = true;
+                    this.scrubTimeline(e);
+                };
+                
+                document.onmousemove = (e) => {
+                    if (isScrubbing) this.scrubTimeline(e);
+                    if (this.isDraggingKeyframe) this.dragKeyframe(e);
+                    if (this.isDraggingBone) this.rotateBoneByDrag(e);
+                };
+                
+                document.onmouseup = (e) => {
+                    isScrubbing = false;
+                    if (this.isDraggingKeyframe) this.endKeyframeDrag(e);
+                    if (this.isDraggingBone) this.endBoneDrag();
+                };
+                
+                canvas.onmousemove = (e) => {
+                    this.updateMousePosition(e);
+                    if (!this.isDraggingBone) this.checkBoneHover();
+                };
+                
+                canvas.oncontextmenu = (e) => {
+                    e.preventDefault();
+                    
+                    // ホバー中なら選択
+                    if (this.hoveredBone) {
+                        this.selectBone(this.hoveredBone);
+                    }
+                };
+                
+                // マウスホイールでボーン回転（OrbitControlsより先に処理）
+                let lastDelta = 0;
+                
+                canvas.addEventListener('wheel', (e) => {
+                    // ボーン選択中は常にズームを防ぐ
+                    if (this.selectedBone) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+                        
+                        // Shift: Y軸, Ctrl: Z軸, なし: X軸
+                        const axis = e.shiftKey ? 'y' : (e.ctrlKey ? 'z' : 'x');
+                        
+                        // 現在の方向を取得（上:-1, 下:+1）
+                        const currentDirection = e.deltaY > 0 ? 1 : -1;
+                        
+                        // 回転を適用（上に回すと+、下に回すと-）
+                        const delta = -currentDirection;
+                        
+                        this.currentRotation[axis] += delta;
+                        this.currentRotation[axis] = Math.max(-180, Math.min(180, this.currentRotation[axis]));
+                        
+                        this.applyRotationPreview();
+                        this.updateRotationDisplay();
+                        this.showAxisIndicator(axis);
+                    }
+                }, { passive: false, capture: true });
+                
+                // ホイールクリックでキーフレーム追加
+                canvas.onmousedown = (e) => {
+                    if (e.button === 1) { // 中クリック
+                        e.preventDefault();
+                        if (this.selectedBone) {
+                            this.addKeyframe();
+                        }
+                    }
+                };
+                
+                // 中クリックのデフォルト動作を防ぐ
+                canvas.onauxclick = (e) => {
+                    if (e.button === 1) {
+                        e.preventDefault();
+                    }
+                };
+                
+                // ドラッグ&ドロップ
+                const dropZone = document.getElementById('drop-zone');
+                document.body.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('active'); };
+                document.body.ondragleave = (e) => { if (!document.body.contains(e.relatedTarget)) dropZone.classList.remove('active'); };
+                document.body.ondrop = (e) => {
+                    e.preventDefault();
+                    dropZone.classList.remove('active');
+                    const file = e.dataTransfer.files[0];
+                    if (file) {
+                        const ext = file.name.split('.').pop().toLowerCase();
+                        if (ext === 'vrm') this.loadVRM(file);
+                        else if (ext === 'vrma') this.loadVRMA(file);
+                    }
+                };
+            }
+            
+            setupKeyboardShortcuts() {
+                document.onkeydown = (e) => {
+                    if (e.key === 'Enter' && this.selectedBone) { e.preventDefault(); this.addKeyframe(); }
+                    if (e.key === 'Delete' && this.selectedKeyframe) { e.preventDefault(); this.deleteSelectedKeyframe(); }
+                    if (e.ctrlKey && e.key === 'c' && this.selectedBone) { e.preventDefault(); this.copyKeyframe(); }
+                    if (e.ctrlKey && e.key === 'v' && this.clipboard) { e.preventDefault(); this.pasteKeyframe(); }
+                    if (e.key === 'ArrowLeft') { e.preventDefault(); this.goToFrame(this.currentFrame - 1); }
+                    if (e.key === 'ArrowRight') { e.preventDefault(); this.goToFrame(this.currentFrame + 1); }
+                    if (e.key === ' ') { e.preventDefault(); this.togglePlayback(); }
+                    
+                    if (this.isDraggingBone) {
+                        if (e.shiftKey && !e.ctrlKey) { this.dragAxis = 'y'; this.updateGizmoInfo(); }
+                        else if (e.ctrlKey && !e.shiftKey) { this.dragAxis = 'z'; this.updateGizmoInfo(); }
+                    }
+                };
+                
+                document.onkeyup = (e) => {
+                    if (this.isDraggingBone && !e.shiftKey && !e.ctrlKey) {
+                        this.dragAxis = 'x';
+                        this.updateGizmoInfo();
+                    }
+                };
+            }
+            
+            async loadVRM(file) {
+                this.showLoading(true);
+                try {
+                    if (this.vrm) {
+                        this.clearBoneHelpers();
+                        this.scene.remove(this.vrm.scene);
+                        VRMUtils.deepDispose(this.vrm.scene);
+                    }
+                    
+                    const url = URL.createObjectURL(file);
+                    const loader = new GLTFLoader();
+                    loader.register((parser) => new VRMLoaderPlugin(parser));
+                    
+                    const gltf = await loader.loadAsync(url);
+                    this.vrm = gltf.userData.vrm;
+                    this.scene.add(this.vrm.scene);
+                    this.mixer = new THREE.AnimationMixer(this.vrm.scene);
+                    
+                    URL.revokeObjectURL(url);
+                    
+                    this.createBoneHelpers();
+                    document.getElementById('vrm-name').textContent = file.name;
+                    console.log('✅ VRM読み込み完了:', file.name);
+                    
+                    if (this.vrmAnimation) this.applyAnimation();
+                } catch (error) {
+                    console.error('❌ VRM読み込みエラー:', error);
+                    alert('VRMの読み込みに失敗しました');
+                }
+                this.showLoading(false);
+            }
+            
+            async loadVRMA(file) {
+                this.showLoading(true);
+                try {
+                    const url = URL.createObjectURL(file);
+                    const loader = new GLTFLoader();
+                    loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
+                    
+                    const gltf = await loader.loadAsync(url);
+                    this.vrmAnimation = gltf.userData.vrmAnimation || (gltf.userData.vrmAnimations && gltf.userData.vrmAnimations[0]);
+                    
+                    URL.revokeObjectURL(url);
+                    
+                    if (!this.vrmAnimation) throw new Error('VRMアニメーションが見つかりません');
+                    
+                    let maxDuration = 0;
+                    if (this.vrmAnimation.humanoidTracks) {
+                        for (const [, track] of this.vrmAnimation.humanoidTracks.rotation.entries()) {
+                            if (track.times?.length > 0) {
+                                maxDuration = Math.max(maxDuration, track.times[track.times.length - 1]);
+                            }
+                        }
+                    }
+                    
+                    this.duration = maxDuration || 5.0;
+                    this.totalFrames = Math.ceil(this.duration * this.fps);
+                    this.currentFrame = 0;
+                    this.playbackTime = 0;
+                    
+                    document.getElementById('vrma-name').textContent = file.name;
+                    document.getElementById('total-frames').textContent = this.totalFrames;
+                    document.getElementById('total-time').textContent = this.duration.toFixed(2);
+                    
+                    console.log('✅ VRMA読み込み完了:', file.name, `(${this.totalFrames} frames, ${this.duration.toFixed(2)}s)`);
+                    
+                    if (this.vrm) this.applyAnimation();
+                    
+                    this.editLayers = {};
+                    this.updateAllUI();
+                    this.updateTimelineRuler();
+                } catch (error) {
+                    console.error('❌ VRMA読み込みエラー:', error);
+                    alert('VRMAの読み込みに失敗しました: ' + error.message);
+                }
+                this.showLoading(false);
+            }
+            
+            applyAnimation() {
+                if (!this.vrm || !this.vrmAnimation) return;
+                
+                if (this.currentAction) {
+                    this.currentAction.stop();
+                    this.currentAction = null;
+                }
+                
+                this.originalClip = createVRMAnimationClip(this.vrmAnimation, this.vrm);
+                
+                // アニメーションアクションを作成
+                this.currentAction = this.mixer.clipAction(this.originalClip);
+                this.currentAction.play();
+                
+                this.goToFrame(0);
+                console.log('✅ アニメーション適用完了');
+            }
+            
+            createBoneHelpers() {
+                this.clearBoneHelpers();
+                if (!this.vrm) return;
+                
+                const sphereGeo = new THREE.SphereGeometry(0.04, 12, 12);
+                
+                this.humanoidBones.forEach(bone => {
+                    const node = this.vrm.humanoid.getNormalizedBoneNode(bone.name);
+                    if (!node) return;
+                    
+                    const mat = new THREE.MeshBasicMaterial({ 
+                        color: 0x667eea, 
+                        transparent: true, 
+                        opacity: 0.7,
+                        depthTest: false // モデルより前に表示
+                    });
+                    const sphere = new THREE.Mesh(sphereGeo, mat);
+                    sphere.userData.boneName = bone.name;
+                    sphere.userData.boneLabel = bone.label;
+                    
+                    this.boneSpheres[bone.name] = sphere;
+                    this.scene.add(sphere);
+                });
+            }
+            
+            clearBoneHelpers() {
+                Object.values(this.boneSpheres).forEach(sphere => {
+                    this.scene.remove(sphere);
+                    sphere.geometry.dispose();
+                    sphere.material.dispose();
+                });
+                this.boneSpheres = {};
+            }
+            
+            updateBoneHelperPositions() {
+                if (!this.vrm) return;
+                
+                Object.entries(this.boneSpheres).forEach(([boneName, sphere]) => {
+                    const node = this.vrm.humanoid.getNormalizedBoneNode(boneName);
+                    if (!node) return;
+                    
+                    const pos = new THREE.Vector3();
+                    node.getWorldPosition(pos);
+                    sphere.position.copy(pos);
+                    
+                    // 色とサイズ
+                    if (boneName === this.selectedBone) {
+                        sphere.material.color.setHex(0xf5576c);
+                        sphere.material.opacity = 0.9;
+                        sphere.scale.setScalar(1.5);
+                    } else if (boneName === this.hoveredBone) {
+                        sphere.material.color.setHex(0x38ef7d);
+                        sphere.material.opacity = 0.8;
+                        sphere.scale.setScalar(1.3);
+                    } else {
+                        sphere.material.color.setHex(0x667eea);
+                        sphere.material.opacity = 0.4;
+                        sphere.scale.setScalar(1.0);
+                    }
+                });
+            }
+            
+            updateMousePosition(event) {
+                const rect = this.renderer.domElement.getBoundingClientRect();
+                this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            }
+            
+            checkBoneHover() {
+                if (!this.vrm) return;
+                
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+                const spheres = Object.values(this.boneSpheres);
+                const intersects = this.raycaster.intersectObjects(spheres);
+                
+                if (intersects.length > 0) {
+                    const boneName = intersects[0].object.userData.boneName;
+                    const boneLabel = intersects[0].object.userData.boneLabel;
+                    this.hoveredBone = boneName;
+                    
+                    const info = document.getElementById('bone-highlight-info');
+                    info.textContent = `🦴 ${boneLabel} (右クリックで回転)`;
+                    info.style.display = 'block';
+                    document.getElementById('canvas-container').style.cursor = 'pointer';
+                } else {
+                    this.hoveredBone = null;
+                    document.getElementById('bone-highlight-info').style.display = 'none';
+                    document.getElementById('canvas-container').style.cursor = 'default';
+                }
+            }
+            
+            startBoneDrag(event) {
+                if (!this.selectedBone) return;
+                
+                this.isDraggingBone = true;
+                this.dragStartPos = { x: event.clientX, y: event.clientY };
+                this.dragAxis = event.shiftKey ? 'y' : (event.ctrlKey ? 'z' : 'x');
+                
+                this.controls.enabled = false;
+                document.getElementById('canvas-container').classList.add('grabbing');
+                document.getElementById('gizmo-info').style.display = 'block';
+                this.updateGizmoInfo();
+            }
+            
+            rotateBoneByDrag(event) {
+                if (!this.isDraggingBone || !this.selectedBone) return;
+                
+                const dx = event.clientX - this.dragStartPos.x;
+                const sensitivity = 0.006;
+                const delta = dx * sensitivity;
+                
+                this.currentRotation[this.dragAxis] += delta;
+                this.currentRotation[this.dragAxis] = Math.max(-180, Math.min(180, this.currentRotation[this.dragAxis]));
+                
+                this.dragStartPos = { x: event.clientX, y: event.clientY };
+                
+                this.applyRotationPreview();
+                this.updateRotationDisplay();
+            }
+            
+            endBoneDrag() {
+                this.isDraggingBone = false;
+                this.controls.enabled = true;
+                document.getElementById('canvas-container').classList.remove('grabbing');
+                document.getElementById('gizmo-info').style.display = 'none';
+            }
+            
+            updateGizmoInfo() {
+                const info = document.getElementById('gizmo-info');
+                const indicator = info.querySelector('.axis-indicator');
+                indicator.className = `axis-indicator ${this.dragAxis}`;
+                indicator.textContent = this.dragAxis.toUpperCase();
+            }
+            
+            showAxisIndicator(axis) {
+                const info = document.getElementById('gizmo-info');
+                const indicator = info.querySelector('.axis-indicator');
+                indicator.className = `axis-indicator ${axis}`;
+                indicator.textContent = axis.toUpperCase();
+                info.style.display = 'block';
+                
+                // 1秒後に消す
+                clearTimeout(this.gizmoTimeout);
+                this.gizmoTimeout = setTimeout(() => {
+                    info.style.display = 'none';
+                }, 1000);
+            }
+            
+            applyRotationPreview() {
+                if (!this.vrm || !this.selectedBone) return;
+                
+                // まず元のポーズを適用
+                this.applyFrame(this.currentFrame);
+                
+                // 選択中のボーンに追加でオフセットを適用
+                const bone = this.vrm.humanoid.getNormalizedBoneNode(this.selectedBone);
+                if (!bone) return;
+                
+                const offsetQuat = new THREE.Quaternion().setFromEuler(
+                    new THREE.Euler(
+                        THREE.MathUtils.degToRad(this.currentRotation.x),
+                        THREE.MathUtils.degToRad(this.currentRotation.y),
+                        THREE.MathUtils.degToRad(this.currentRotation.z),
+                        'XYZ'
+                    )
+                );
+                
+                bone.quaternion.multiply(offsetQuat);
+            }
+            
+            selectBone(boneName) {
+                this.selectedBone = boneName;
+                
+                document.querySelectorAll('.bone-item').forEach(item => {
+                    item.classList.toggle('selected', item.dataset.bone === boneName);
+                });
+                
+                const boneInfo = this.humanoidBones.find(b => b.name === boneName);
+                document.getElementById('selected-bone-name').textContent = boneInfo?.label || boneName;
+                
+                this.loadRotationForCurrentFrame();
+                this.updateKeyframeMarkers();
+                
+                console.log('🦴 ボーン選択:', boneName);
+            }
+            
+            loadRotationForCurrentFrame() {
+                if (!this.selectedBone) {
+                    this.currentRotation = { x: 0, y: 0, z: 0 };
+                } else {
+                    this.currentRotation = { ...this.getInterpolatedEditOffset(this.selectedBone, this.currentFrame) };
+                }
+                this.updateRotationDisplay();
+            }
+            
+            updateRotationDisplay() {
+                document.getElementById('rot-x-display').textContent = Math.round(this.currentRotation.x) + '°';
+                document.getElementById('rot-y-display').textContent = Math.round(this.currentRotation.y) + '°';
+                document.getElementById('rot-z-display').textContent = Math.round(this.currentRotation.z) + '°';
+            }
+            
+            addKeyframe() {
+                if (!this.selectedBone) {
+                    alert('ボーンを選択してください');
+                    return;
+                }
+                
+                if (!this.editLayers[this.selectedBone]) {
+                    this.editLayers[this.selectedBone] = {};
+                }
+                
+                this.editLayers[this.selectedBone][this.currentFrame] = { ...this.currentRotation };
+                
+                this.updateAllUI();
+                this.showNotification('⬇️ キーフレーム追加');
+                console.log(`✅ キーフレーム追加: ${this.selectedBone} @ ${this.currentFrame}`);
+            }
+            
+            resetRotation() {
+                this.currentRotation = { x: 0, y: 0, z: 0 };
+                this.updateRotationDisplay();
+                this.applyFrame(this.currentFrame);
+            }
+            
+            getInterpolatedEditOffset(boneName, frame) {
+                const boneEdits = this.editLayers[boneName];
+                if (!boneEdits) return { x: 0, y: 0, z: 0 };
+                
+                const frames = Object.keys(boneEdits).map(Number).sort((a, b) => a - b);
+                if (frames.length === 0) return { x: 0, y: 0, z: 0 };
+                
+                if (boneEdits[frame]) return { ...boneEdits[frame] };
+                if (frame <= frames[0]) return { ...boneEdits[frames[0]] };
+                if (frame >= frames[frames.length - 1]) return { ...boneEdits[frames[frames.length - 1]] };
+                
+                let prev = frames[0], next = frames[frames.length - 1];
+                for (let i = 0; i < frames.length - 1; i++) {
+                    if (frames[i] <= frame && frames[i + 1] >= frame) {
+                        prev = frames[i];
+                        next = frames[i + 1];
+                        break;
+                    }
+                }
+                
+                const t = (next - prev) > 0 ? (frame - prev) / (next - prev) : 0;
+                const p = boneEdits[prev], n = boneEdits[next];
+                
+                return {
+                    x: p.x + (n.x - p.x) * t,
+                    y: p.y + (n.y - p.y) * t,
+                    z: p.z + (n.z - p.z) * t
+                };
+            }
+            
+            applyFrame(frame) {
+                if (!this.vrm || !this.mixer || !this.originalClip) return;
+                
+                // Mixerで元アニメーションのフレームを適用
+                const time = Math.min(frame / this.fps, this.duration);
+                this.mixer.setTime(time);
+                
+                // 編集レイヤーのオフセットを適用
+                Object.entries(this.editLayers).forEach(([boneName, keyframes]) => {
+                    if (Object.keys(keyframes).length === 0) return;
+                    
+                    const bone = this.vrm.humanoid.getNormalizedBoneNode(boneName);
+                    if (!bone) return;
+                    
+                    const offset = this.getInterpolatedEditOffset(boneName, frame);
+                    if (offset.x === 0 && offset.y === 0 && offset.z === 0) return;
+                    
+                    const offsetQuat = new THREE.Quaternion().setFromEuler(
+                        new THREE.Euler(
+                            THREE.MathUtils.degToRad(offset.x),
+                            THREE.MathUtils.degToRad(offset.y),
+                            THREE.MathUtils.degToRad(offset.z),
+                            'XYZ'
+                        )
+                    );
+                    
+                    bone.quaternion.multiply(offsetQuat);
+                });
+            }
+            
+            copyKeyframe() {
+                if (!this.selectedBone) return;
+                
+                const edit = this.editLayers[this.selectedBone]?.[this.currentFrame];
+                this.clipboard = {
+                    boneName: this.selectedBone,
+                    rotation: edit ? { ...edit } : { ...this.currentRotation }
+                };
+                this.showNotification('📋 コピーしました');
+            }
+            
+            pasteKeyframe() {
+                if (!this.clipboard || !this.selectedBone) return;
+                
+                if (!this.editLayers[this.selectedBone]) {
+                    this.editLayers[this.selectedBone] = {};
+                }
+                
+                this.editLayers[this.selectedBone][this.currentFrame] = { ...this.clipboard.rotation };
+                this.currentRotation = { ...this.clipboard.rotation };
+                
+                this.updateAllUI();
+                this.applyFrame(this.currentFrame);
+                this.showNotification('📋 ペーストしました');
+            }
+            
+            deleteSelectedKeyframe() {
+                if (!this.selectedKeyframe) return;
+                
+                const { boneName, frame } = this.selectedKeyframe;
+                
+                if (this.editLayers[boneName]?.[frame]) {
+                    delete this.editLayers[boneName][frame];
+                    
+                    if (Object.keys(this.editLayers[boneName]).length === 0) {
+                        delete this.editLayers[boneName];
+                    }
+                    
+                    this.selectedKeyframe = null;
+                    this.updateAllUI();
+                    this.loadRotationForCurrentFrame();
+                    this.applyFrame(this.currentFrame);
+                    this.showNotification('🗑️ 削除しました');
+                }
+            }
+            
+            startKeyframeDrag(boneName, frame, event) {
+                this.isDraggingKeyframe = true;
+                this.selectedKeyframe = { boneName, frame };
+                this.keyframeDragStartFrame = frame;
+                event.stopPropagation();
+            }
+            
+            dragKeyframe(event) {
+                if (!this.isDraggingKeyframe || !this.selectedKeyframe) return;
+                
+                const track = document.getElementById('timeline-track');
+                const rect = track.getBoundingClientRect();
+                const percent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+                const newFrame = Math.round(percent * (this.totalFrames - 1));
+                
+                const marker = document.querySelector(`.keyframe-marker.dragging, .keyframe-marker[data-bone="${this.selectedKeyframe.boneName}"][data-frame="${this.selectedKeyframe.frame}"]`);
+                if (marker) {
+                    marker.style.left = (newFrame / Math.max(1, this.totalFrames - 1)) * 100 + '%';
+                    marker.classList.add('dragging');
+                }
+            }
+            
+            endKeyframeDrag(event) {
+                if (!this.isDraggingKeyframe || !this.selectedKeyframe) return;
+                
+                const track = document.getElementById('timeline-track');
+                const rect = track.getBoundingClientRect();
+                const percent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+                const newFrame = Math.round(percent * (this.totalFrames - 1));
+                
+                const { boneName, frame: oldFrame } = this.selectedKeyframe;
+                
+                if (newFrame !== oldFrame && this.editLayers[boneName]?.[oldFrame]) {
+                    const data = this.editLayers[boneName][oldFrame];
+                    delete this.editLayers[boneName][oldFrame];
+                    this.editLayers[boneName][newFrame] = data;
+                    this.selectedKeyframe.frame = newFrame;
+                    console.log(`📍 キーフレーム移動: ${oldFrame} → ${newFrame}`);
+                }
+                
+                this.isDraggingKeyframe = false;
+                this.updateAllUI();
+                this.applyFrame(this.currentFrame);
+            }
+            
+            togglePlayback() {
+                this.isPlaying = !this.isPlaying;
+                
+                if (this.isPlaying) {
+                    this.playbackTime = this.currentFrame / this.fps;
+                }
+                
+                document.getElementById('play-btn').classList.toggle('active', this.isPlaying);
+                document.getElementById('play-btn').textContent = this.isPlaying ? '⏸' : '▶';
+            }
+            
+            toggleLoop() {
+                this.isLooping = !this.isLooping;
+                document.getElementById('loop-btn').classList.toggle('active', this.isLooping);
+            }
+            
+            goToFrame(frame) {
+                frame = Math.max(0, Math.min(this.totalFrames - 1, frame));
+                this.currentFrame = frame;
+                this.playbackTime = frame / this.fps;
+                
+                this.applyFrame(frame);
+                this.updateTimelineUI();
+                this.loadRotationForCurrentFrame();
+            }
+            
+            scrubTimeline(event) {
+                const track = document.getElementById('timeline-track');
+                const rect = track.getBoundingClientRect();
+                const percent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+                const frame = Math.round(percent * (this.totalFrames - 1));
+                this.goToFrame(frame);
+            }
+            
+            updateTimelineUI() {
+                const percent = this.totalFrames > 1 ? (this.currentFrame / (this.totalFrames - 1)) * 100 : 0;
+                
+                document.getElementById('timeline-scrubber').style.left = percent + '%';
+                document.getElementById('timeline-progress').style.width = percent + '%';
+                document.getElementById('current-frame').textContent = this.currentFrame;
+                document.getElementById('current-time').textContent = (this.currentFrame / this.fps).toFixed(2);
+            }
+            
+            updateTimelineRuler() {
+                const ruler = document.getElementById('timeline-ruler');
+                ruler.innerHTML = '';
+                if (this.totalFrames === 0) return;
+                
+                const step = Math.max(1, Math.floor(this.totalFrames / 10));
+                for (let f = 0; f <= this.totalFrames; f += step) {
+                    const percent = this.totalFrames > 1 ? (f / (this.totalFrames - 1)) * 100 : 0;
+                    const mark = document.createElement('div');
+                    mark.className = 'ruler-mark';
+                    mark.style.left = Math.min(percent, 100) + '%';
+                    mark.textContent = f;
+                    ruler.appendChild(mark);
+                }
+            }
+            
+            updateKeyframeMarkers() {
+                const track = document.getElementById('timeline-track');
+                track.querySelectorAll('.keyframe-marker').forEach(m => m.remove());
+                
+                if (this.totalFrames === 0) return;
+                
+                // 選択ボーンのキーフレーム
+                if (this.selectedBone && this.editLayers[this.selectedBone]) {
+                    Object.keys(this.editLayers[this.selectedBone]).forEach(frameStr => {
+                        const frame = parseInt(frameStr);
+                        const percent = (frame / Math.max(1, this.totalFrames - 1)) * 100;
+                        
+                        const marker = document.createElement('div');
+                        marker.className = 'keyframe-marker selected-bone';
+                        marker.style.left = percent + '%';
+                        marker.dataset.bone = this.selectedBone;
+                        marker.dataset.frame = frame;
+                        marker.title = `${this.selectedBone} @ Frame ${frame}`;
+                        
+                        if (this.selectedKeyframe?.boneName === this.selectedBone && this.selectedKeyframe?.frame === frame) {
+                            marker.classList.add('selected');
+                        }
+                        
+                        marker.onmousedown = (e) => {
+                            e.stopPropagation();
+                            this.selectedKeyframe = { boneName: this.selectedBone, frame };
+                            this.startKeyframeDrag(this.selectedBone, frame, e);
+                            this.updateKeyframeMarkers();
+                        };
+                        
+                        marker.onclick = (e) => {
+                            e.stopPropagation();
+                            this.selectedKeyframe = { boneName: this.selectedBone, frame };
+                            this.goToFrame(frame);
+                            this.updateKeyframeMarkers();
+                        };
+                        
+                        track.appendChild(marker);
+                    });
+                }
+                
+                // 他のボーンのキーフレーム
+                Object.entries(this.editLayers).forEach(([boneName, frames]) => {
+                    if (boneName === this.selectedBone) return;
+                    
+                    Object.keys(frames).forEach(frameStr => {
+                        const frame = parseInt(frameStr);
+                        const percent = (frame / Math.max(1, this.totalFrames - 1)) * 100;
+                        
+                        const marker = document.createElement('div');
+                        marker.className = 'keyframe-marker other-bone';
+                        marker.style.left = percent + '%';
+                        marker.dataset.bone = boneName;
+                        marker.dataset.frame = frame;
+                        
+                        marker.onclick = (e) => {
+                            e.stopPropagation();
+                            this.selectBone(boneName);
+                            this.goToFrame(frame);
+                        };
+                        
+                        track.appendChild(marker);
+                    });
+                });
+            }
+            
+            updateAllUI() {
+                this.updateLayerList();
+                this.updateBoneListUI();
+                this.updateKeyframeMarkers();
+                this.updateEditCount();
+            }
+            
+            updateEditCount() {
+                let count = 0;
+                Object.values(this.editLayers).forEach(layer => count += Object.keys(layer).length);
+                document.getElementById('edit-count').textContent = count;
+            }
+            
+            updateLayerList() {
+                const container = document.getElementById('layer-list');
+                const boneNames = Object.keys(this.editLayers);
+                
+                if (boneNames.length === 0) {
+                    container.innerHTML = '<p style="color: #666; font-size: 11px;">キーフレームを追加すると表示</p>';
+                    return;
+                }
+                
+                container.innerHTML = boneNames.map(boneName => {
+                    const frames = Object.keys(this.editLayers[boneName]).map(Number).sort((a, b) => a - b);
+                    const boneInfo = this.humanoidBones.find(b => b.name === boneName);
+                    return `
+                        <div class="layer-item">
+                            <span class="layer-name">${boneInfo?.label || boneName}</span>
+                            <span class="layer-frames">${frames.length}個</span>
+                            <button class="layer-delete" data-bone="${boneName}">✕</button>
+                        </div>
+                    `;
+                }).join('');
+                
+                container.querySelectorAll('.layer-delete').forEach(btn => {
+                    btn.onclick = () => {
+                        delete this.editLayers[btn.dataset.bone];
+                        this.updateAllUI();
+                        this.loadRotationForCurrentFrame();
+                        this.applyFrame(this.currentFrame);
+                    };
+                });
+            }
+            
+            updateBoneListUI() {
+                document.querySelectorAll('.bone-item').forEach(item => {
+                    const boneName = item.dataset.bone;
+                    const editCount = this.editLayers[boneName] ? Object.keys(this.editLayers[boneName]).length : 0;
+                    
+                    item.classList.toggle('has-edit', editCount > 0);
+                    
+                    const countEl = item.querySelector('.edit-count');
+                    if (countEl) {
+                        countEl.style.display = editCount > 0 ? 'inline' : 'none';
+                        countEl.textContent = editCount;
+                    }
+                });
+            }
+            
+            showNotification(message) {
+                const el = document.getElementById('copy-notification');
+                el.textContent = message;
+                el.style.display = 'block';
+                setTimeout(() => el.style.display = 'none', 1500);
+            }
+            
+            showLoading(show) {
+                document.getElementById('loading').style.display = show ? 'block' : 'none';
+            }
+            
+            async exportVRMA() {
+                if (!this.vrm || !this.originalClip) {
+                    alert('VRMとVRMAを読み込んでください');
+                    return;
+                }
+                
+                if (Object.keys(this.editLayers).length === 0) {
+                    alert('編集がありません');
+                    return;
+                }
+                
+                this.showLoading(true);
+                
+                try {
+                    const editedClip = this.createEditedClip();
+                    
+                    const scene = new THREE.Scene();
+                    scene.add(new THREE.Object3D());
+                    
+                    const exporter = new GLTFExporter();
+                    const glb = await new Promise((resolve, reject) => {
+                        exporter.parse(scene, resolve, reject, { binary: true, animations: [editedClip] });
+                    });
+                    
+                    const blob = new Blob([glb], { type: 'application/octet-stream' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `edited_${Date.now()}.vrma`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    
+                    this.showNotification('💾 出力完了!');
+                } catch (error) {
+                    console.error('❌ エクスポートエラー:', error);
+                    alert('エクスポートに失敗しました');
+                }
+                
+                this.showLoading(false);
+            }
+            
+            createEditedClip() {
+                const editedClip = this.originalClip.clone();
+                
+                Object.entries(this.editLayers).forEach(([boneName, keyframes]) => {
+                    const bone = this.vrm.humanoid.getNormalizedBoneNode(boneName);
+                    if (!bone) return;
+                    
+                    const trackName = `${bone.name}.quaternion`;
+                    const trackIndex = editedClip.tracks.findIndex(t => t.name === trackName);
+                    if (trackIndex === -1) return;
+                    
+                    const track = editedClip.tracks[trackIndex];
+                    
+                    for (let i = 0; i < track.times.length; i++) {
+                        const frame = Math.round(track.times[i] * this.fps);
+                        const offset = this.getInterpolatedEditOffset(boneName, frame);
+                        
+                        if (offset.x === 0 && offset.y === 0 && offset.z === 0) continue;
+                        
+                        const offsetQuat = new THREE.Quaternion().setFromEuler(
+                            new THREE.Euler(
+                                THREE.MathUtils.degToRad(offset.x),
+                                THREE.MathUtils.degToRad(offset.y),
+                                THREE.MathUtils.degToRad(offset.z),
+                                'XYZ'
+                            )
+                        );
+                        
+                        const idx = i * 4;
+                        const q = new THREE.Quaternion(
+                            track.values[idx], track.values[idx + 1],
+                            track.values[idx + 2], track.values[idx + 3]
+                        );
+                        q.multiply(offsetQuat);
+                        
+                        track.values[idx] = q.x;
+                        track.values[idx + 1] = q.y;
+                        track.values[idx + 2] = q.z;
+                        track.values[idx + 3] = q.w;
+                    }
+                });
+                
+                return editedClip;
+            }
+            
+            onResize() {
+                const container = document.getElementById('canvas-container');
+                const width = container.clientWidth;
+                const height = window.innerHeight - 130;
+                
+                this.camera.aspect = width / height;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(width, height);
+            }
+            
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                
+                const delta = this.clock.getDelta();
+                
+                // 再生中
+                if (this.isPlaying && this.totalFrames > 0) {
+                    this.playbackTime += delta;
+                    
+                    if (this.playbackTime >= this.duration) {
+                        if (this.isLooping) {
+                            this.playbackTime = 0;
+                        } else {
+                            this.playbackTime = this.duration;
+                            this.isPlaying = false;
+                            document.getElementById('play-btn').classList.remove('active');
+                            document.getElementById('play-btn').textContent = '▶';
+                        }
+                    }
+                    
+                    const newFrame = Math.floor(this.playbackTime * this.fps);
+                    if (newFrame !== this.currentFrame) {
+                        this.currentFrame = Math.min(newFrame, this.totalFrames - 1);
+                        this.applyFrame(this.currentFrame);
+                        this.updateTimelineUI();
+                    }
+                }
+                
+                if (this.vrm) this.vrm.update(delta);
+                
+                this.updateBoneHelperPositions();
+                this.controls.update();
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+        
+        const editor = new VRMAMotionEditorPro();
+        window.editor = editor;
+    </script>
+</body>
+</html>

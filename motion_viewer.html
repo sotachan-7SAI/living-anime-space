@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HY-Motion Viewer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #1a1a2e; 
+            color: #eee;
+            overflow: hidden;
+        }
+        #container { width: 100vw; height: 100vh; }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.7);
+            padding: 15px 20px;
+            border-radius: 10px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        #info h1 { font-size: 18px; margin-bottom: 10px; color: #4ecdc4; }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 25px;
+            font-size: 14px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background: #4ecdc4;
+            color: #1a1a2e;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+        button:hover { background: #45b7aa; transform: scale(1.05); }
+        button.danger { background: #ff6b6b; }
+        button.danger:hover { background: #ee5a5a; }
+        #frame-info {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 16px;
+            color: #4ecdc4;
+        }
+        #drop-zone {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 400px;
+            height: 200px;
+            border: 3px dashed #4ecdc4;
+            border-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(78, 205, 196, 0.1);
+        }
+        #drop-zone.hidden { display: none; }
+        #drop-zone h2 { color: #4ecdc4; margin-bottom: 10px; }
+        #drop-zone p { color: #888; }
+        #speed-control {
+            position: absolute;
+            bottom: 130px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #4ecdc4;
+        }
+        #speed-control input { width: 150px; }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    
+    <div id="drop-zone">
+        <h2>📁 NPZ / JSONファイルをドロップ</h2>
+        <p>HY-Motionで生成したモーションファイル</p>
+        <input type="file" id="file-input" accept=".npz,.json" style="margin-top: 15px;">
+    </div>
+    
+    <div id="info" style="display:none;">
+        <h1>🎬 HY-Motion Viewer</h1>
+        <div id="motion-text">-</div>
+        <div>Duration: <span id="duration">-</span>s</div>
+        <div>Frames: <span id="frames">-</span></div>
+        <div>Joints: <span id="joints">-</span></div>
+    </div>
+    
+    <div id="speed-control" style="display:none;">
+        <span>速度:</span>
+        <input type="range" id="speed-slider" min="0.1" max="3" step="0.1" value="1">
+        <span id="speed-value">1.0x</span>
+    </div>
+    
+    <div id="frame-info" style="display:none;">Frame: <span id="current-frame">0</span> / <span id="total-frames">0</span></div>
+    
+    <div id="controls" style="display:none;">
+        <button id="play-btn">▶ Play</button>
+        <button id="reset-btn">⟲ Reset</button>
+        <button id="clear-btn" class="danger">🗑️ 削除</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://unpkg.com/fflate@0.8.0/umd/index.js"></script>
+    
+    <script>
+        let scene, camera, renderer, controls;
+        let skeleton = null;
+        let motionData = null;
+        let currentFrame = 0;
+        let isPlaying = false;
+        let playbackSpeed = 1.0;
+        let lastTime = 0;
+        let frameAccumulator = 0;
+        
+        const BONE_CONNECTIONS = [
+            [0, 1], [1, 4], [4, 7], [7, 10],
+            [0, 2], [2, 5], [5, 8], [8, 11],
+            [0, 3], [3, 6], [6, 9],
+            [9, 12], [12, 15],
+            [9, 13], [13, 16], [16, 18], [18, 20],
+            [9, 14], [14, 17], [17, 19], [19, 21],
+        ];
+        
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a2e);
+            
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 1.5, 4);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('container').appendChild(renderer.domElement);
+            
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.target.set(0, 1, 0);
+            controls.update();
+            
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+            directional.position.set(5, 10, 5);
+            scene.add(directional);
+            
+            scene.add(new THREE.GridHelper(10, 20, 0x4ecdc4, 0x2a2a4a));
+            
+            window.addEventListener('resize', onResize);
+            lastTime = performance.now();
+            animate();
+        }
+        
+        function createSkeleton(numJoints) {
+            if (skeleton) scene.remove(skeleton);
+            skeleton = new THREE.Group();
+            
+            const jointGeom = new THREE.SphereGeometry(0.03, 16, 16);
+            const jointMat = new THREE.MeshStandardMaterial({ color: 0x4ecdc4 });
+            
+            for (let i = 0; i < numJoints; i++) {
+                const joint = new THREE.Mesh(jointGeom, jointMat);
+                joint.name = `joint_${i}`;
+                skeleton.add(joint);
+            }
+            
+            const boneMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+            for (const [a, b] of BONE_CONNECTIONS) {
+                if (a < numJoints && b < numJoints) {
+                    const geom = new THREE.BufferGeometry();
+                    geom.setAttribute('position', new THREE.Float32BufferAttribute([0,0,0, 0,0,0], 3));
+                    const line = new THREE.Line(geom, boneMat);
+                    line.name = `bone_${a}_${b}`;
+                    skeleton.add(line);
+                }
+            }
+            scene.add(skeleton);
+        }
+        
+        function updateSkeleton(frameIndex) {
+            if (!skeleton || !motionData) return;
+            const keypoints = motionData.keypoints[frameIndex];
+            
+            for (let i = 0; i < keypoints.length; i++) {
+                const joint = skeleton.getObjectByName(`joint_${i}`);
+                if (joint) joint.position.set(keypoints[i][0], keypoints[i][1], keypoints[i][2]);
+            }
+            
+            for (const [a, b] of BONE_CONNECTIONS) {
+                const line = skeleton.getObjectByName(`bone_${a}_${b}`);
+                if (line && keypoints[a] && keypoints[b]) {
+                    const pos = line.geometry.attributes.position.array;
+                    pos[0] = keypoints[a][0]; pos[1] = keypoints[a][1]; pos[2] = keypoints[a][2];
+                    pos[3] = keypoints[b][0]; pos[4] = keypoints[b][1]; pos[5] = keypoints[b][2];
+                    line.geometry.attributes.position.needsUpdate = true;
+                }
+            }
+        }
+        
+        function loadMotionData(data) {
+            motionData = data;
+            currentFrame = 0;
+            
+            document.getElementById('motion-text').textContent = `"${data.text || 'No description'}"`;
+            document.getElementById('duration').textContent = data.duration.toFixed(1);
+            document.getElementById('frames').textContent = data.frames;
+            document.getElementById('joints').textContent = data.joints;
+            document.getElementById('total-frames').textContent = data.frames;
+            
+            document.getElementById('drop-zone').classList.add('hidden');
+            document.getElementById('info').style.display = 'block';
+            document.getElementById('controls').style.display = 'flex';
+            document.getElementById('frame-info').style.display = 'block';
+            document.getElementById('speed-control').style.display = 'flex';
+            
+            createSkeleton(data.joints);
+            updateSkeleton(0);
+            console.log('✅ Motion loaded:', data.frames, 'frames,', data.joints, 'joints');
+        }
+        
+        function clearMotion() {
+            if (skeleton) {
+                scene.remove(skeleton);
+                skeleton = null;
+            }
+            motionData = null;
+            currentFrame = 0;
+            isPlaying = false;
+            
+            document.getElementById('drop-zone').classList.remove('hidden');
+            document.getElementById('info').style.display = 'none';
+            document.getElementById('controls').style.display = 'none';
+            document.getElementById('frame-info').style.display = 'none';
+            document.getElementById('speed-control').style.display = 'none';
+            document.getElementById('play-btn').textContent = '▶ Play';
+            document.getElementById('file-input').value = '';
+            
+            console.log('🗑️ Motion cleared');
+        }
+        
+        async function loadNPZ(arrayBuffer) {
+            console.log('📦 Loading NPZ...');
+            try {
+                const uint8 = new Uint8Array(arrayBuffer);
+                const unzipped = fflate.unzipSync(uint8);
+                console.log('📦 NPZ keys:', Object.keys(unzipped));
+                
+                const npzData = {};
+                for (const [name, data] of Object.entries(unzipped)) {
+                    npzData[name.replace('.npy', '')] = parseNPY(data);
+                }
+                
+                if (!npzData.keypoints3d) throw new Error('keypoints3dが見つかりません');
+                
+                let keypoints = npzData.keypoints3d;
+                if (Array.isArray(keypoints[0]) && Array.isArray(keypoints[0][0]) && Array.isArray(keypoints[0][0][0])) {
+                    keypoints = keypoints[0];
+                }
+                
+                const frames = keypoints.length;
+                const joints = keypoints[0].length;
+                let duration = npzData.duration;
+                if (Array.isArray(duration)) duration = duration[0];
+                if (typeof duration !== 'number') duration = frames / 30;
+                
+                loadMotionData({
+                    text: npzData.text || 'NPZ Motion',
+                    duration: duration,
+                    frames: frames,
+                    joints: joints,
+                    keypoints: keypoints
+                });
+            } catch (error) {
+                console.error('NPZ load error:', error);
+                alert('NPZ読み込み失敗: ' + error.message);
+            }
+        }
+        
+        function parseNPY(data) {
+            const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+            const magic = String.fromCharCode(...data.slice(0, 6));
+            if (!magic.startsWith('\x93NUMPY')) throw new Error('Invalid NPY format');
+            
+            const majorVersion = data[6];
+            let headerLen, headerStart;
+            if (majorVersion === 1) { headerLen = view.getUint16(8, true); headerStart = 10; }
+            else { headerLen = view.getUint32(8, true); headerStart = 12; }
+            
+            const header = new TextDecoder('utf-8').decode(data.slice(headerStart, headerStart + headerLen));
+            const descrMatch = header.match(/'descr':\s*'([^']+)'/);
+            const shapeMatch = header.match(/'shape':\s*\(([^)]*)\)/);
+            
+            const dtype = descrMatch ? descrMatch[1] : '<f4';
+            const shapeStr = shapeMatch ? shapeMatch[1] : '';
+            const shape = shapeStr ? shapeStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
+            
+            const bytes = data.slice(headerStart + headerLen);
+            const aligned = new ArrayBuffer(bytes.byteLength);
+            new Uint8Array(aligned).set(bytes);
+            
+            let arr;
+            if (dtype.includes('f4')) arr = new Float32Array(aligned);
+            else if (dtype.includes('f8')) arr = new Float64Array(aligned);
+            else if (dtype.includes('U') || dtype.includes('S')) return new TextDecoder('utf-8').decode(bytes).replace(/\x00/g, '').trim();
+            else arr = new Float32Array(aligned);
+            
+            return shape.length > 1 ? reshapeArray(Array.from(arr), shape) : Array.from(arr);
+        }
+        
+        function reshapeArray(flat, shape) {
+            if (shape.length === 1) return flat;
+            if (shape.length === 2) {
+                const [r, c] = shape, res = [];
+                for (let i = 0; i < r; i++) res.push(flat.slice(i*c, (i+1)*c));
+                return res;
+            }
+            if (shape.length === 3) {
+                const [d0, d1, d2] = shape, res = [];
+                for (let i = 0; i < d0; i++) {
+                    const p = [];
+                    for (let j = 0; j < d1; j++) { const s = (i*d1+j)*d2; p.push(flat.slice(s, s+d2)); }
+                    res.push(p);
+                }
+                return res;
+            }
+            if (shape.length === 4) {
+                const [d0, d1, d2, d3] = shape, res = [];
+                for (let i = 0; i < d0; i++) {
+                    const c = [];
+                    for (let j = 0; j < d1; j++) {
+                        const p = [];
+                        for (let k = 0; k < d2; k++) { const s = ((i*d1+j)*d2+k)*d3; p.push(flat.slice(s, s+d3)); }
+                        c.push(p);
+                    }
+                    res.push(c);
+                }
+                return res;
+            }
+            return flat;
+        }
+        
+        function loadJSON(text) {
+            loadMotionData(JSON.parse(text));
+        }
+        
+        function handleFile(file) {
+            const reader = new FileReader();
+            if (file.name.endsWith('.json')) {
+                reader.onload = (e) => loadJSON(e.target.result);
+                reader.readAsText(file);
+            } else if (file.name.endsWith('.npz')) {
+                reader.onload = (e) => loadNPZ(e.target.result);
+                reader.readAsArrayBuffer(file);
+            }
+        }
+        
+        function togglePlay() {
+            isPlaying = !isPlaying;
+            document.getElementById('play-btn').textContent = isPlaying ? '⏸ Pause' : '▶ Play';
+        }
+        
+        function resetAnimation() {
+            currentFrame = 0;
+            isPlaying = false;
+            document.getElementById('play-btn').textContent = '▶ Play';
+            if (motionData) updateSkeleton(0);
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const now = performance.now();
+            const delta = (now - lastTime) / 1000;
+            lastTime = now;
+            
+            if (isPlaying && motionData) {
+                const fps = motionData.frames / motionData.duration;
+                frameAccumulator += delta * fps * playbackSpeed;
+                while (frameAccumulator >= 1) {
+                    currentFrame = (currentFrame + 1) % motionData.frames;
+                    frameAccumulator -= 1;
+                }
+                updateSkeleton(currentFrame);
+                document.getElementById('current-frame').textContent = currentFrame;
+            }
+            
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        // Event listeners
+        document.getElementById('file-input').addEventListener('change', (e) => {
+            if (e.target.files[0]) handleFile(e.target.files[0]);
+        });
+        
+        document.getElementById('drop-zone').addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.currentTarget.style.borderColor = '#fff';
+        });
+        
+        document.getElementById('drop-zone').addEventListener('dragleave', (e) => {
+            e.currentTarget.style.borderColor = '#4ecdc4';
+        });
+        
+        document.getElementById('drop-zone').addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.currentTarget.style.borderColor = '#4ecdc4';
+            if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+        });
+        
+        document.getElementById('play-btn').addEventListener('click', togglePlay);
+        document.getElementById('reset-btn').addEventListener('click', resetAnimation);
+        document.getElementById('clear-btn').addEventListener('click', clearMotion);
+        
+        document.getElementById('speed-slider').addEventListener('input', (e) => {
+            playbackSpeed = parseFloat(e.target.value);
+            document.getElementById('speed-value').textContent = playbackSpeed.toFixed(1) + 'x';
+        });
+        
+        // Allow drag & drop anywhere when motion is loaded
+        document.body.addEventListener('dragover', (e) => e.preventDefault());
+        document.body.addEventListener('drop', (e) => {
+            e.preventDefault();
+            if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+        });
+        
+        init();
+    </script>
+</body>
+</html>

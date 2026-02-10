@@ -1,0 +1,33 @@
+========================================
+imagination-wipe.js v3.5 更新ノート
+========================================
+
+【更新日】2025-02-02
+
+【新機能】
+1. 監視対象選択
+   - マルチキャラ会話 / AIチャット（Grok）を切り替え可能
+   - localStorage で設定保存
+
+2. AIチャット監視
+   - #chat-messages を MutationObserver で監視
+   - AIの返答から自動で画像生成
+
+3. Grok + BBS 同時送信
+   - 画像を Grok Voice と AI BBS に同時送信
+   - window.latestSharedImage にも保存
+
+4. 新ボタン追加
+   - 「キャプチャをGrok+BBSに見せる」
+   - 「現在の画像をGrok+BBSに送る」
+
+【インストール方法】
+imagination-wipe-v35.js を
+I:\filesystem\ai_creative_vrm\A0093\vrm-ai-viewer\imagination-wipe.js
+にリネームして上書きコピー
+
+【動作確認】
+- Ctrl+Shift+R でハードリロード
+- コンソールで「v3.5」のログを確認
+
+========================================
