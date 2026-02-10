@@ -1,9 +1,11 @@
 // ========================================
-// 📱 スマホ用クイックランチャー v1.2
+// 📱 スマホ用クイックランチャー v1.3
 // ========================================
 // スマホは画面が小さいのでUI全非表示が基本
 // フローティングボタン2つ（📋UI管理, 🎙️Grok Voice）のみ常時表示
 // UI管理パネルから必要なUIだけ個別にON可能
+// + マルチキャラクター全員オミット（enabled:false）
+// + デフォルトモデルは ./model.vrm（ルート直下）
 // ========================================
 
 (function() {
@@ -18,7 +20,7 @@
         return;
     }
 
-    console.log('📱 スマホ用クイックランチャー v1.2 初期化中...');
+    console.log('📱 スマホ用クイックランチャー v1.3 初期化中...');
 
     // ========================================
     // スタイル
@@ -207,16 +209,25 @@
         closeLauncher();
         showFloatingButtons();
 
+        // 全UI非表示 + マルチキャラ無効化（少し待ってDOMが揃ってから）
         setTimeout(() => {
-            // 全UI非表示
             nukeAllUI();
-            // デフォルトモデル読み込み
-            loadDefaultModel();
-            // Grok Voice
-            if (enableGrokVoice) {
-                setTimeout(() => activateGrokVoice(), 2000);
-            }
+            disableAllMultiCharacters();
         }, 500);
+
+        // さらに遅延して再度実行（後から生成されるUI要素対策）
+        setTimeout(() => {
+            nukeAllUI();
+        }, 2000);
+
+        setTimeout(() => {
+            nukeAllUI();
+        }, 5000);
+
+        // Grok Voice
+        if (enableGrokVoice) {
+            setTimeout(() => activateGrokVoice(), 3000);
+        }
     }
 
     function showFloatingButtons() {
@@ -237,7 +248,7 @@
     // 全UI完全非表示（何も残さない）
     // ========================================
     function nukeAllUI() {
-        console.log('📱 全UI完全非表示...');
+        console.log('📱 全UI完全非表示実行...');
 
         // 1. ID指定で非表示にする全パネル
         const panelIds = [
@@ -267,52 +278,100 @@
             'physics-panel', 'physics-toggle-container',
             'api-settings-toggle',
             'drop-overlay',
+            'ui-manager-panel',
         ];
         panelIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = 'none';
         });
 
-        // 2. CSSセレクタで残りのUI要素も非表示
-        const selectors = [
-            '.floating-btn', '.floating-button', '.floating-icon',
-            '.side-button', '.tool-button', '.corner-button', '.bottom-button',
-            '[class*="float"][class*="btn"]', '[class*="toggle-btn"]',
-            '[class*="icon-btn"]', '[class*="control-button"]',
-            'button[style*="position: fixed"]',
-            'div[style*="position: fixed"]',
-            '[id*="toggle-btn"]', '[id*="floating"]',
-        ];
-        document.querySelectorAll(selectors.join(',')).forEach(el => {
-            // 自分のフローティングボタンは除外
+        // 2. CSSセレクタで残りのUI要素も非表示（position:fixedの要素すべて）
+        document.querySelectorAll('*').forEach(el => {
+            // 自分のボタンとcanvasは除外
             if (el.id === 'mobile-ui-manager-btn' || el.id === 'mobile-grok-btn') return;
-            // ランチャー自体も除外
             if (el.id === 'mobile-launcher-overlay') return;
-            el.style.display = 'none';
+            if (el.tagName === 'CANVAS') return;
+            if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK') return;
+            if (el.tagName === 'HTML' || el.tagName === 'BODY' || el.tagName === 'HEAD') return;
+
+            const computed = window.getComputedStyle(el);
+            if (computed.position === 'fixed' || computed.position === 'absolute') {
+                // パネル・ボタン系のfixed/absolute要素を非表示
+                const rect = el.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                    el.style.display = 'none';
+                }
+            }
         });
 
-        // 3. マルチキャラ会話パネルの停止中要素も非表示
-        document.querySelectorAll('[class*="multi-char"], [class*="multichar"]').forEach(el => {
-            el.style.display = 'none';
-        });
+        // 3. 自分のボタンを再表示（上で消されてしまう場合の復元）
+        const uiBtn = document.getElementById('mobile-ui-manager-btn');
+        const grokBtn = document.getElementById('mobile-grok-btn');
+        if (uiBtn) uiBtn.style.display = 'flex';
+        if (grokBtn) grokBtn.style.display = 'flex';
 
-        console.log('📱 全UI非表示完了 — フローティングボタン2つのみ');
+        console.log('📱 全UI非表示完了');
     }
 
     // ========================================
-    // デフォルトモデル読み込み
+    // マルチキャラクター全員無効化（オミット）
     // ========================================
-    function loadDefaultModel() {
-        const modelPath = 'models/ギャル05脱着.vrm';
+    function disableAllMultiCharacters() {
         let attempts = 0;
         const wait = setInterval(() => {
             attempts++;
-            if (window.viewer && typeof window.viewer.loadVRM === 'function') {
+
+            // multiCharUI経由
+            const mcUI = window.multiCharUI || window.multiCharacterUI;
+            if (mcUI && mcUI.characterConfigs) {
                 clearInterval(wait);
-                console.log('📱 デフォルトモデル読み込み');
-                window.viewer.loadVRM(modelPath);
-            } else if (attempts > 30) {
+                mcUI.characterConfigs.forEach(char => {
+                    char.enabled = false;
+                });
+                // UI更新（チェックボックスを反映）
+                if (typeof mcUI.updateCharacterList === 'function') mcUI.updateCharacterList();
+                if (typeof mcUI.renderCharacterList === 'function') mcUI.renderCharacterList();
+                console.log('📱 マルチキャラクター全員オミット完了 (UI経由)');
+                return;
+            }
+
+            // multiCharManager経由
+            const mcMgr = window.multiCharManager;
+            if (mcMgr) {
                 clearInterval(wait);
+                // characters Mapを走査
+                if (mcMgr.characters) {
+                    for (const [id, unit] of mcMgr.characters) {
+                        unit.enabled = false;
+                    }
+                }
+                // characterConfigsがある場合
+                if (mcMgr.characterConfigs) {
+                    mcMgr.characterConfigs.forEach(char => {
+                        char.enabled = false;
+                    });
+                }
+                console.log('📱 マルチキャラクター全員オミット完了 (Manager経由)');
+                return;
+            }
+
+            // DOM上のチェックボックスを直接操作
+            const checkboxes = document.querySelectorAll('.mc-char-toggle');
+            if (checkboxes.length > 0) {
+                clearInterval(wait);
+                checkboxes.forEach(cb => {
+                    if (cb.checked) {
+                        cb.checked = false;
+                        cb.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                });
+                console.log('📱 マルチキャラクター全員オミット完了 (DOM経由)');
+                return;
+            }
+
+            if (attempts > 30) {
+                clearInterval(wait);
+                console.log('📱 マルチキャラクター未検出（スキップ）');
             }
         }, 500);
     }
