@@ -1,11 +1,9 @@
 // ========================================
-// 📱 スマホ用クイックランチャー v1.3
+// 📱 スマホ用クイックランチャー v1.4
 // ========================================
-// スマホは画面が小さいのでUI全非表示が基本
-// フローティングボタン2つ（📋UI管理, 🎙️Grok Voice）のみ常時表示
-// UI管理パネルから必要なUIだけ個別にON可能
-// + マルチキャラクター全員オミット（enabled:false）
-// + デフォルトモデルは ./model.vrm（ルート直下）
+// + API設定画面をランチャー内に直接表示
+// + マルチキャラクター全員オミット
+// + 全UI完全非表示
 // ========================================
 
 (function() {
@@ -20,7 +18,17 @@
         return;
     }
 
-    console.log('📱 スマホ用クイックランチャー v1.3 初期化中...');
+    console.log('📱 スマホ用クイックランチャー v1.4 初期化中...');
+
+    // ========================================
+    // API設定のlocalStorageキー定義
+    // ========================================
+    const API_CONFIGS = [
+        { key: 'openai_api_key', name: 'OpenAI', icon: '🤖', placeholder: 'sk-...', desc: 'ChatGPT・TTS' },
+        { key: 'grok_api_key', name: 'Grok (xAI)', icon: '⚡', placeholder: 'xai-...', desc: '音声会話' },
+        { key: 'gemini_api_key', name: 'Google', icon: '🔍', placeholder: 'AIzaSy...', desc: 'Gemini・TTS', key2: 'banana_api_key' },
+        { key: 'tripo_api_key', name: 'Tripo3D', icon: '🎨', placeholder: 'tsk_...', desc: '3D生成（任意）' },
+    ];
 
     // ========================================
     // スタイル
@@ -34,12 +42,13 @@
             z-index: 999999;
             display: flex;
             flex-direction: column;
-            justify-content: center;
+            justify-content: flex-start;
             align-items: center;
             font-family: 'Segoe UI', 'Yu Gothic', 'Meiryo', sans-serif;
             animation: mlFadeIn 0.3s ease;
             overflow-y: auto;
-            padding: 20px;
+            padding: 40px 20px 40px;
+            -webkit-overflow-scrolling: touch;
         }
         @keyframes mlFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
@@ -80,6 +89,10 @@
         #mobile-launcher-overlay .ml-btn-small {
             padding: 12px 16px; font-size: 13px; font-weight: normal;
         }
+        #mobile-launcher-overlay .ml-btn-save {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white; box-shadow: 0 4px 15px rgba(240, 147, 251, 0.4);
+        }
         #mobile-launcher-overlay .ml-divider {
             border: none; border-top: 1px solid rgba(255, 255, 255, 0.1); margin: 18px 0;
         }
@@ -91,6 +104,49 @@
             display: flex; gap: 10px;
         }
         #mobile-launcher-overlay .ml-btn-row .ml-btn { flex: 1; }
+
+        /* API設定フォーム */
+        #ml-api-section {
+            display: none;
+            text-align: left;
+            margin-top: 4px;
+        }
+        #ml-api-section.visible { display: block; }
+
+        .ml-api-item {
+            margin-bottom: 12px;
+        }
+        .ml-api-label {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 13px; font-weight: bold; color: #ddd;
+            margin-bottom: 4px;
+        }
+        .ml-api-label .ml-api-desc {
+            font-weight: normal; font-size: 11px; color: #888;
+        }
+        .ml-api-input {
+            width: 100%; padding: 12px 14px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 10px;
+            color: #fff; font-size: 14px;
+            outline: none;
+            -webkit-appearance: none;
+            box-sizing: border-box;
+        }
+        .ml-api-input:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.3);
+        }
+        .ml-api-input::placeholder { color: #555; }
+        .ml-api-saved {
+            border-color: #38ef7d !important;
+        }
+        .ml-api-status {
+            font-size: 11px; color: #38ef7d; margin-top: 3px;
+            display: none;
+        }
+        .ml-api-status.visible { display: block; }
 
         /* フローティングボタン */
         #mobile-ui-manager-btn {
@@ -134,6 +190,29 @@
     // ランチャーUI
     // ========================================
     function createLauncher() {
+        // API入力欄HTML生成
+        let apiFieldsHTML = '';
+        API_CONFIGS.forEach(api => {
+            const saved = localStorage.getItem(api.key) || '';
+            const hasSaved = saved.length > 5;
+            apiFieldsHTML += `
+                <div class="ml-api-item">
+                    <div class="ml-api-label">
+                        ${api.icon} ${api.name}
+                        <span class="ml-api-desc">${api.desc}</span>
+                    </div>
+                    <input type="text" class="ml-api-input ${hasSaved ? 'ml-api-saved' : ''}"
+                           id="ml-api-${api.key}"
+                           placeholder="${api.placeholder}"
+                           value="${hasSaved ? saved : ''}"
+                           autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                    <div class="ml-api-status ${hasSaved ? 'visible' : ''}" id="ml-api-status-${api.key}">
+                        ✅ 保存済み
+                    </div>
+                </div>
+            `;
+        });
+
         const overlay = document.createElement('div');
         overlay.id = 'mobile-launcher-overlay';
         overlay.innerHTML = `
@@ -142,26 +221,40 @@
                 <div class="ml-title">Living Anime Space</div>
                 <div class="ml-subtitle">VRM AI チャットビューアー</div>
 
-                <button class="ml-btn ml-btn-primary" id="ml-btn-start">
-                    🚀 開始する
-                </button>
-                <div class="ml-desc">UIは非表示で開始。右下 📋 からUI管理できます</div>
-
-                <button class="ml-btn ml-btn-grok" id="ml-btn-grok">
-                    🎙️ Grok Voice で音声会話
-                </button>
-                <div class="ml-desc">音声で直接キャラと会話できます</div>
-
-                <hr class="ml-divider">
-                <div class="ml-section-label">設定</div>
-
-                <div class="ml-btn-row">
-                    <button class="ml-btn ml-btn-secondary ml-btn-small" id="ml-btn-api">
-                        🔑 API設定
+                <div id="ml-main-buttons">
+                    <button class="ml-btn ml-btn-primary" id="ml-btn-start">
+                        🚀 開始する
                     </button>
+                    <div class="ml-desc">UIは非表示で開始。右下 📋 からUI管理できます</div>
+
+                    <button class="ml-btn ml-btn-grok" id="ml-btn-grok">
+                        🎙️ Grok Voice で音声会話
+                    </button>
+
+                    <hr class="ml-divider">
+                    <div class="ml-section-label">設定</div>
+
+                    <button class="ml-btn ml-btn-secondary" id="ml-btn-api">
+                        🔑 APIキーを設定する
+                    </button>
+
                     <button class="ml-btn ml-btn-secondary ml-btn-small" id="ml-btn-skip">
-                        ⏭️ スキップ
+                        ⏭️ スキップ（そのまま開始）
                     </button>
+                </div>
+
+                <div id="ml-api-section">
+                    <div class="ml-section-label" style="margin-bottom:16px;">🔑 APIキー設定</div>
+                    ${apiFieldsHTML}
+                    <button class="ml-btn ml-btn-save" id="ml-api-save">
+                        💾 保存して戻る
+                    </button>
+                    <button class="ml-btn ml-btn-secondary ml-btn-small" id="ml-api-back">
+                        ← 戻る
+                    </button>
+                    <div class="ml-desc" style="margin-top:8px;">
+                        キーはブラウザのlocalStorageに保存されます（サーバーには送信されません）
+                    </div>
                 </div>
             </div>
         `;
@@ -178,28 +271,64 @@
         grokBtn.innerHTML = '🎙️';
         document.body.appendChild(grokBtn);
 
+        // ========================================
         // イベント
-        document.getElementById('ml-btn-start').addEventListener('click', () => {
-            startApp(false);
-        });
-        document.getElementById('ml-btn-grok').addEventListener('click', () => {
-            startApp(true);
-        });
-        document.getElementById('ml-btn-api').addEventListener('click', () => {
-            closeLauncher();
-            showFloatingButtons();
-            setTimeout(() => {
-                const apiToggle = document.getElementById('api-settings-toggle');
-                if (apiToggle) apiToggle.click();
-            }, 500);
-        });
+        // ========================================
+
+        document.getElementById('ml-btn-start').addEventListener('click', () => startApp(false));
+        document.getElementById('ml-btn-grok').addEventListener('click', () => startApp(true));
         document.getElementById('ml-btn-skip').addEventListener('click', () => {
-            closeLauncher();
-            showFloatingButtons();
+            closeLauncher(); showFloatingButtons();
+        });
+
+        // API設定画面の表示切替
+        document.getElementById('ml-btn-api').addEventListener('click', () => {
+            document.getElementById('ml-main-buttons').style.display = 'none';
+            document.getElementById('ml-api-section').classList.add('visible');
+            // 最初の入力欄にフォーカス
+            const firstInput = document.querySelector('.ml-api-input');
+            if (firstInput) setTimeout(() => firstInput.focus(), 100);
+        });
+
+        document.getElementById('ml-api-save').addEventListener('click', () => saveApiKeys());
+        document.getElementById('ml-api-back').addEventListener('click', () => {
+            saveApiKeys();
+            showMainButtons();
         });
 
         uiBtn.addEventListener('click', toggleUIManagerPanel);
         grokBtn.addEventListener('click', toggleGrokVoice);
+    }
+
+    // ========================================
+    // APIキー保存
+    // ========================================
+    function saveApiKeys() {
+        API_CONFIGS.forEach(api => {
+            const input = document.getElementById(`ml-api-${api.key}`);
+            const status = document.getElementById(`ml-api-status-${api.key}`);
+            if (!input) return;
+
+            const val = input.value.trim();
+            if (val.length > 5) {
+                localStorage.setItem(api.key, val);
+                // 副キーがある場合（Google → banana_api_key）
+                if (api.key2) localStorage.setItem(api.key2, val);
+                input.classList.add('ml-api-saved');
+                if (status) { status.textContent = '✅ 保存しました'; status.classList.add('visible'); }
+            } else if (val === '') {
+                localStorage.removeItem(api.key);
+                if (api.key2) localStorage.removeItem(api.key2);
+                input.classList.remove('ml-api-saved');
+                if (status) status.classList.remove('visible');
+            }
+        });
+        console.log('📱 APIキー保存完了');
+    }
+
+    function showMainButtons() {
+        document.getElementById('ml-main-buttons').style.display = '';
+        document.getElementById('ml-api-section').classList.remove('visible');
     }
 
     // ========================================
@@ -209,22 +338,13 @@
         closeLauncher();
         showFloatingButtons();
 
-        // 全UI非表示 + マルチキャラ無効化（少し待ってDOMが揃ってから）
         setTimeout(() => {
             nukeAllUI();
             disableAllMultiCharacters();
         }, 500);
+        setTimeout(() => nukeAllUI(), 2000);
+        setTimeout(() => nukeAllUI(), 5000);
 
-        // さらに遅延して再度実行（後から生成されるUI要素対策）
-        setTimeout(() => {
-            nukeAllUI();
-        }, 2000);
-
-        setTimeout(() => {
-            nukeAllUI();
-        }, 5000);
-
-        // Grok Voice
         if (enableGrokVoice) {
             setTimeout(() => activateGrokVoice(), 3000);
         }
@@ -245,12 +365,9 @@
     }
 
     // ========================================
-    // 全UI完全非表示（何も残さない）
+    // 全UI完全非表示
     // ========================================
     function nukeAllUI() {
-        console.log('📱 全UI完全非表示実行...');
-
-        // 1. ID指定で非表示にする全パネル
         const panelIds = [
             'left-panel', 'right-panel', 'chat-panel', 'morph-panel',
             'multi-character-panel', 'supervisor-panel', 'ai-director-panel',
@@ -276,27 +393,22 @@
             'panel-control-buttons', 'control-buttons-container',
             'bottom-left-controls', 'bottom-right-controls',
             'physics-panel', 'physics-toggle-container',
-            'api-settings-toggle',
-            'drop-overlay',
-            'ui-manager-panel',
+            'api-settings-toggle', 'drop-overlay', 'ui-manager-panel',
         ];
         panelIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = 'none';
         });
 
-        // 2. CSSセレクタで残りのUI要素も非表示（position:fixedの要素すべて）
+        // position:fixed/absolute の要素を全て非表示
         document.querySelectorAll('*').forEach(el => {
-            // 自分のボタンとcanvasは除外
             if (el.id === 'mobile-ui-manager-btn' || el.id === 'mobile-grok-btn') return;
             if (el.id === 'mobile-launcher-overlay') return;
-            if (el.tagName === 'CANVAS') return;
-            if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK') return;
+            if (el.tagName === 'CANVAS' || el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK') return;
             if (el.tagName === 'HTML' || el.tagName === 'BODY' || el.tagName === 'HEAD') return;
 
             const computed = window.getComputedStyle(el);
             if (computed.position === 'fixed' || computed.position === 'absolute') {
-                // パネル・ボタン系のfixed/absolute要素を非表示
                 const rect = el.getBoundingClientRect();
                 if (rect.width > 0 && rect.height > 0) {
                     el.style.display = 'none';
@@ -304,75 +416,45 @@
             }
         });
 
-        // 3. 自分のボタンを再表示（上で消されてしまう場合の復元）
+        // 自分のボタン復元
         const uiBtn = document.getElementById('mobile-ui-manager-btn');
         const grokBtn = document.getElementById('mobile-grok-btn');
         if (uiBtn) uiBtn.style.display = 'flex';
         if (grokBtn) grokBtn.style.display = 'flex';
-
-        console.log('📱 全UI非表示完了');
     }
 
     // ========================================
-    // マルチキャラクター全員無効化（オミット）
+    // マルチキャラクター全員無効化
     // ========================================
     function disableAllMultiCharacters() {
         let attempts = 0;
         const wait = setInterval(() => {
             attempts++;
-
-            // multiCharUI経由
             const mcUI = window.multiCharUI || window.multiCharacterUI;
             if (mcUI && mcUI.characterConfigs) {
                 clearInterval(wait);
-                mcUI.characterConfigs.forEach(char => {
-                    char.enabled = false;
-                });
-                // UI更新（チェックボックスを反映）
+                mcUI.characterConfigs.forEach(c => c.enabled = false);
                 if (typeof mcUI.updateCharacterList === 'function') mcUI.updateCharacterList();
                 if (typeof mcUI.renderCharacterList === 'function') mcUI.renderCharacterList();
-                console.log('📱 マルチキャラクター全員オミット完了 (UI経由)');
+                console.log('📱 マルチキャラ全員オミット完了');
                 return;
             }
-
-            // multiCharManager経由
             const mcMgr = window.multiCharManager;
             if (mcMgr) {
                 clearInterval(wait);
-                // characters Mapを走査
-                if (mcMgr.characters) {
-                    for (const [id, unit] of mcMgr.characters) {
-                        unit.enabled = false;
-                    }
-                }
-                // characterConfigsがある場合
-                if (mcMgr.characterConfigs) {
-                    mcMgr.characterConfigs.forEach(char => {
-                        char.enabled = false;
-                    });
-                }
-                console.log('📱 マルチキャラクター全員オミット完了 (Manager経由)');
+                if (mcMgr.characters) for (const [,u] of mcMgr.characters) u.enabled = false;
+                if (mcMgr.characterConfigs) mcMgr.characterConfigs.forEach(c => c.enabled = false);
+                console.log('📱 マルチキャラ全員オミット完了');
                 return;
             }
-
-            // DOM上のチェックボックスを直接操作
-            const checkboxes = document.querySelectorAll('.mc-char-toggle');
-            if (checkboxes.length > 0) {
+            const cbs = document.querySelectorAll('.mc-char-toggle');
+            if (cbs.length > 0) {
                 clearInterval(wait);
-                checkboxes.forEach(cb => {
-                    if (cb.checked) {
-                        cb.checked = false;
-                        cb.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                });
-                console.log('📱 マルチキャラクター全員オミット完了 (DOM経由)');
+                cbs.forEach(cb => { if (cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('change', {bubbles:true})); }});
+                console.log('📱 マルチキャラ全員オミット完了 (DOM)');
                 return;
             }
-
-            if (attempts > 30) {
-                clearInterval(wait);
-                console.log('📱 マルチキャラクター未検出（スキップ）');
-            }
+            if (attempts > 30) clearInterval(wait);
         }, 500);
     }
 
@@ -380,11 +462,7 @@
     // Grok Voice
     // ========================================
     function activateGrokVoice() {
-        const selectors = [
-            '#grok-voice-toggle', '[id*="grok"][id*="connect"]',
-            '[id*="grok"][id*="toggle"]',
-        ];
-        for (const sel of selectors) {
+        for (const sel of ['#grok-voice-toggle', '[id*="grok"][id*="connect"]', '[id*="grok"][id*="toggle"]']) {
             const btn = document.querySelector(sel);
             if (btn) { btn.click(); updateGrokBtn(true); return; }
         }
@@ -396,9 +474,7 @@
     function toggleGrokVoice() {
         const btn = document.getElementById('mobile-grok-btn');
         if (btn.classList.contains('active')) {
-            if (window.viewer && window.viewer.grokClient) {
-                try { window.viewer.grokClient.disconnect(); } catch(e) {}
-            }
+            if (window.viewer && window.viewer.grokClient) try { window.viewer.grokClient.disconnect(); } catch(e) {}
             const t = document.querySelector('#grok-voice-toggle');
             if (t && t.textContent.includes('切断')) t.click();
             updateGrokBtn(false);
