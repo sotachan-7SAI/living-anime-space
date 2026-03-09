@@ -1,5 +1,5 @@
 // ========================================
-// AI BBS UI パネル v1.8
+// AI BBS UI パネル v1.9
 // ニコ動/TikTokライブ風コメント表示
 // 監視対象選択機能追加
 // ChatGPT / Gemini / Grok 選択対応
@@ -46,7 +46,7 @@ class BBSPanel {
                     <select id="bbs-ai-provider">
                         <option value="grok">🤖 Grok</option>
                         <option value="openai">💬 ChatGPT</option>
-                        <option value="gemini">✨ Gemini</option>
+                        <option value="gemini" selected>✨ Gemini</option>
                     </select>
                 </div>
                 <div class="bbs-setting-row">
@@ -759,46 +759,75 @@ class BBSPanel {
             agentCount: this.panel.querySelector('#bbs-agent-count').value,
             postInterval: this.panel.querySelector('#bbs-post-interval').value,
             sendToGrok: this.panel.querySelector('#bbs-send-to-grok').classList.contains('active'),
-            flowFontSize: this.flowFontSize
+            flowFontSize: this.flowFontSize,
+            autoStart: this.manager.isRunning,  // ★ 動作中なら次回も自動開始
+            flowMode: this.flowMode              // ★ 流れる表示状態を保存
         };
         localStorage.setItem('ai-bbs-settings', JSON.stringify(settings));
     }
     
     loadSettings() {
         try {
-            const settings = JSON.parse(localStorage.getItem('ai-bbs-settings'));
-            if (settings) {
-                if (settings.provider) {
-                    this.panel.querySelector('#bbs-ai-provider').value = settings.provider;
-                    this.manager.setProvider(settings.provider);
-                }
-                if (settings.watchTarget) {
-                    this.panel.querySelector('#bbs-watch-target').value = settings.watchTarget;
-                    this.manager.setWatchTarget(settings.watchTarget);
-                }
-                this.panel.querySelector('#bbs-agent-count').value = settings.agentCount || '5';
-                this.panel.querySelector('#bbs-post-interval').value = settings.postInterval || '3000';
-                
-                this.manager.postInterval = parseInt(settings.postInterval) || 3000;
-                
-                if (settings.agentCount === '30') {
-                    this.manager.initFullAgents();
-                }
-                
-                // 流れるコメント文字サイズ
-                if (settings.flowFontSize) {
-                    this.flowFontSize = settings.flowFontSize;
-                    this.panel.querySelector('#bbs-flow-fontsize').value = this.flowFontSize;
-                    this.panel.querySelector('#bbs-flow-fontsize-val').textContent = this.flowFontSize + 'px';
-                }
-                
-                // Grokに見せるトグル
-                const sendToGrokBtn = this.panel.querySelector('#bbs-send-to-grok');
-                const sendToGrok = settings.sendToGrok !== false; // デフォルトはON
-                sendToGrokBtn.classList.toggle('active', sendToGrok);
-                sendToGrokBtn.textContent = sendToGrok ? 'ON' : 'OFF';
-                this.manager.setSendToGrok(sendToGrok);
+            const saved = localStorage.getItem('ai-bbs-settings');
+            const settings = saved ? JSON.parse(saved) : null;
+
+            // ========================================
+            // デフォルト値（初回起動 or 設定なし時）
+            // ========================================
+            const defaults = {
+                provider: 'gemini',   // ★ デフォルトGemini
+                watchTarget: 'multi',
+                agentCount: '5',
+                postInterval: '3000',
+                sendToGrok: true,
+                flowFontSize: 36,
+                autoStart: true,      // ★ 自動開始ON
+                flowMode: true        // ★ 流れる表示ON
+            };
+
+            const s = settings ? Object.assign({}, defaults, settings) : defaults;
+
+            // プロバイダ適用
+            this.panel.querySelector('#bbs-ai-provider').value = s.provider;
+            this.manager.setProvider(s.provider);
+
+            // 監視対象
+            this.panel.querySelector('#bbs-watch-target').value = s.watchTarget;
+            this.manager.setWatchTarget(s.watchTarget);
+
+            // エージェント数・投稿間隔
+            this.panel.querySelector('#bbs-agent-count').value = s.agentCount;
+            this.panel.querySelector('#bbs-post-interval').value = s.postInterval;
+            this.manager.postInterval = parseInt(s.postInterval) || 3000;
+            if (s.agentCount === '30') this.manager.initFullAgents();
+
+            // 流れるコメント文字サイズ
+            this.flowFontSize = s.flowFontSize;
+            this.panel.querySelector('#bbs-flow-fontsize').value = this.flowFontSize;
+            this.panel.querySelector('#bbs-flow-fontsize-val').textContent = this.flowFontSize + 'px';
+
+            // Grokに見せるトグル
+            const sendToGrokBtn = this.panel.querySelector('#bbs-send-to-grok');
+            sendToGrokBtn.classList.toggle('active', s.sendToGrok);
+            sendToGrokBtn.textContent = s.sendToGrok ? 'ON' : 'OFF';
+            this.manager.setSendToGrok(s.sendToGrok);
+
+            // ★ 流れる表示モード自動ON
+            if (s.flowMode && !this.flowMode) {
+                setTimeout(() => this.toggleFlowMode(), 500);
             }
+
+            // ★ 自動開始（設定なし初回 or autoStart=true の場合）
+            if (s.autoStart) {
+                setTimeout(() => {
+                    const startBtn = this.panel.querySelector('#bbs-start-btn');
+                    if (startBtn && !startBtn.disabled) {
+                        startBtn.click();
+                        console.log('🎭 AI BBS 自動開始（デフォルト設定）');
+                    }
+                }, 2000);
+            }
+
         } catch (e) {
             console.warn('BBS設定の読み込み失敗:', e);
         }
