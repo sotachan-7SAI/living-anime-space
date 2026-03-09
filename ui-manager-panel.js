@@ -1,5 +1,5 @@
 // ========================================
-// UI管理パネル v2.8
+// UI管理パネル v2.9 (スマホ対応)
 // ========================================
 //
 // 🎯 目的:
@@ -44,7 +44,7 @@
 (function() {
     'use strict';
     
-    console.log('📋 UI管理パネル v2.8 読み込み開始');
+    console.log('📋 UI管理パネル v2.9 読み込み開始');
     
     // ========================================
     // 管理対象パネル定義
@@ -191,7 +191,7 @@
                 this.createUI();
             }, 3000);
             
-            console.log('📋 UIManagerPanel v2.8 初期化完了');
+            console.log('📋 UIManagerPanel v2.9 初期化完了');
         }
         
         // ========================================
@@ -932,6 +932,88 @@
                         box-shadow: 0 10px 50px rgba(100, 80, 255, 0.4);
                         display: none;
                     }
+                    /* ===== スマホ対応 (480px以下) ===== */
+                    @media (max-width: 480px) {
+                        #ui-manager-panel {
+                            top: 0 !important;
+                            left: 0 !important;
+                            width: 100vw !important;
+                            max-width: 100vw !important;
+                            min-width: unset !important;
+                            max-height: 90vh !important;
+                            border-radius: 0 0 16px 16px !important;
+                            border-left: none !important;
+                            border-right: none !important;
+                            border-top: none !important;
+                            font-size: 12px;
+                        }
+                        #ui-manager-panel .uim-header {
+                            padding: 8px 10px !important;
+                        }
+                        #ui-manager-panel .uim-header h3 {
+                            font-size: 13px !important;
+                        }
+                        #ui-manager-panel .uim-content {
+                            padding: 8px !important;
+                            max-height: calc(90vh - 80px) !important;
+                            -webkit-overflow-scrolling: touch;
+                        }
+                        #ui-manager-panel .uim-grid {
+                            grid-template-columns: 1fr !important;
+                            gap: 4px !important;
+                        }
+                        #ui-manager-panel .uim-item {
+                            padding: 6px 8px !important;
+                        }
+                        #ui-manager-panel .uim-item-name {
+                            font-size: 11px !important;
+                        }
+                        #ui-manager-panel .uim-toggle {
+                            width: 36px !important;
+                            height: 18px !important;
+                        }
+                        #ui-manager-panel .uim-toggle::after {
+                            width: 14px !important;
+                            height: 14px !important;
+                        }
+                        #ui-manager-panel .uim-toggle.on::after {
+                            left: 20px !important;
+                        }
+                        #ui-manager-panel .uim-actions {
+                            grid-template-columns: repeat(2, 1fr) !important;
+                            gap: 6px !important;
+                        }
+                        #ui-manager-panel .uim-btn {
+                            padding: 7px 4px !important;
+                            font-size: 10px !important;
+                        }
+                        #ui-manager-panel .uim-icon-toggle {
+                            padding: 8px 10px !important;
+                        }
+                        #ui-manager-panel .uim-icon-label {
+                            font-size: 11px !important;
+                        }
+                        #ui-manager-panel .uim-preset-slot {
+                            padding: 6px 8px !important;
+                        }
+                        #ui-manager-panel .uim-preset-name {
+                            font-size: 10px !important;
+                        }
+                        #ui-manager-panel .uim-preset-btn {
+                            width: 24px !important;
+                            height: 24px !important;
+                            font-size: 12px !important;
+                        }
+                        #ui-manager-panel .uim-resize-handle {
+                            display: none !important;
+                        }
+                        #ui-manager-panel .uim-hint {
+                            display: none !important;
+                        }
+                        #ui-manager-panel .uim-section-title {
+                            font-size: 10px !important;
+                        }
+                    }
                     #ui-manager-panel .uim-header {
                         background: linear-gradient(135deg, #6a4eff, #a855f7);
                         padding: 10px 15px;
@@ -1339,7 +1421,7 @@
                 setTimeout(() => this.hideAllIcons(), 500);
             }
             
-            console.log('📋 UI管理パネル v2.3 作成完了');
+            console.log('📋 UI管理パネル v2.9 作成完了');
         }
         
         // ========================================
@@ -1489,6 +1571,6 @@
     window.UIManagerPanel = UIManagerPanel;
     window.uiManagerPanel = new UIManagerPanel();
     
-    console.log('📋 UI管理パネル v2.3 グローバル登録完了 (Shift+Uで開閉)');
+    console.log('📋 UI管理パネル v2.9 グローバル登録完了 (Shift+Uで開閉)');
     
 })();
