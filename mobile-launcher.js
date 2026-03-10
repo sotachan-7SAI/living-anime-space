@@ -507,4 +507,86 @@
     if (initDelay) document.addEventListener(initDelay, init);
     else init();
 
+    // ========================================
+    // 📱 汎用タッチドラッグ v2（全パネル対応）
+    // ヘッダークラスに頂わず、パネル上部40pxタップでドラッグ
+    // ========================================
+
+    // 現在ドラッグ中のパネルを追跡
+    let activeDragPanel = null;
+    let dragOffsetX = 0, dragOffsetY = 0;
+
+    // グローバル touchmove / touchend は1回だけ登録
+    document.addEventListener('touchmove', (e) => {
+        if (!activeDragPanel) return;
+        const t = e.touches[0];
+        const newLeft = t.clientX - dragOffsetX;
+        const newTop  = t.clientY - dragOffsetY;
+        const maxLeft = window.innerWidth  - activeDragPanel.offsetWidth;
+        const maxTop  = window.innerHeight - 50;
+        activeDragPanel.style.left = Math.max(0, Math.min(newLeft, maxLeft)) + 'px';
+        activeDragPanel.style.top  = Math.max(0, Math.min(newTop,  maxTop )) + 'px';
+        e.preventDefault();
+    }, { passive: false });
+
+    document.addEventListener('touchend', () => { activeDragPanel = null; });
+
+    function setupTouchDragForPanel(panel) {
+        if (panel.dataset.touchDragV2) return; // 重複登録防止
+        panel.dataset.touchDragV2 = '1';
+
+        panel.addEventListener('touchstart', (e) => {
+            // パネル上部40pxの内側のタッチのみドラッグ開始
+            const panelRect = panel.getBoundingClientRect();
+            const t = e.touches[0];
+            const touchY = t.clientY - panelRect.top;
+            if (touchY > 50) return; // ヘッダー内（50px以内）以外はスルー
+
+            // ボタン・入力はドラッグしない
+            const tag = e.target.tagName;
+            if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+
+            // positionをfixedに変更（安全に現在位置を固定）
+            const style = window.getComputedStyle(panel);
+            if (style.position !== 'fixed') {
+                panel.style.position = 'fixed';
+                panel.style.left = panelRect.left + 'px';
+                panel.style.top  = panelRect.top  + 'px';
+                panel.style.right  = 'auto';
+                panel.style.bottom = 'auto';
+            }
+
+            dragOffsetX = t.clientX - panel.offsetLeft;
+            dragOffsetY = t.clientY - panel.offsetTop;
+            activeDragPanel = panel;
+            e.preventDefault();
+        }, { passive: false });
+    }
+
+    function applyTouchDragToAllPanels() {
+        document.querySelectorAll('div[id], section[id]').forEach(el => {
+            if (el.dataset.touchDragV2) return;
+            if (el.id === 'ui-manager-panel') return; // 自己管理済み
+            if (el.id === 'bbs-flow-container') return; // 流れるコメントは除外
+
+            const style = window.getComputedStyle(el);
+            if (style.position !== 'fixed' && style.position !== 'absolute') return;
+            if (style.display === 'none') return;
+
+            const rect = el.getBoundingClientRect();
+            if (rect.width < 80 || rect.height < 40) return;
+
+            setupTouchDragForPanel(el);
+        });
+    }
+
+    // 初回: 4秒後（パネル生成待ち）
+    setTimeout(applyTouchDragToAllPanels, 4000);
+    // 10秒後: 後から追加されるパネルも対応
+    setTimeout(applyTouchDragToAllPanels, 10000);
+    // グローバル公開（手動呼び出し用）
+    window.applyTouchDragToAllPanels = applyTouchDragToAllPanels;
+
+    console.log('📱 汎用タッチドラッグ v2 初期化完了');
+
 })();

@@ -444,29 +444,43 @@ class BBSPanel {
         const header = this.panel.querySelector('.bbs-header');
         let isDragging = false;
         let startX, startY, startLeft, startTop;
-        
-        header.addEventListener('mousedown', (e) => {
+
+        const onStart = (clientX, clientY) => {
             isDragging = true;
-            startX = e.clientX;
-            startY = e.clientY;
+            startX = clientX;
+            startY = clientY;
             const rect = this.panel.getBoundingClientRect();
             startLeft = rect.left;
             startTop = rect.top;
-        });
-        
-        document.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            const dx = e.clientX - startX;
-            const dy = e.clientY - startY;
-            this.panel.style.left = (startLeft + dx) + 'px';
-            this.panel.style.top = (startTop + dy) + 'px';
             this.panel.style.right = 'auto';
             this.panel.style.bottom = 'auto';
-        });
-        
-        document.addEventListener('mouseup', () => {
-            isDragging = false;
-        });
+        };
+        const onMove = (clientX, clientY) => {
+            if (!isDragging) return;
+            this.panel.style.left = (startLeft + clientX - startX) + 'px';
+            this.panel.style.top  = (startTop  + clientY - startY) + 'px';
+        };
+        const onEnd = () => { isDragging = false; };
+
+        // マウス
+        header.addEventListener('mousedown', (e) => { if (e.target.tagName !== 'BUTTON') onStart(e.clientX, e.clientY); });
+        document.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY));
+        document.addEventListener('mouseup', onEnd);
+
+        // タッチ（iPhone対応）
+        header.addEventListener('touchstart', (e) => {
+            if (e.target.tagName === 'BUTTON') return;
+            const t = e.touches[0];
+            onStart(t.clientX, t.clientY);
+            e.preventDefault();
+        }, { passive: false });
+        document.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            const t = e.touches[0];
+            onMove(t.clientX, t.clientY);
+            e.preventDefault();
+        }, { passive: false });
+        document.addEventListener('touchend', onEnd);
     }
     
     setupCallbacks() {
