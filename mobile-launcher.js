@@ -590,3 +590,91 @@
     console.log('📱 汎用タッチドラッグ v2 初期化完了');
 
 })();
+
+// ========================================
+// 📱 汎用タッチドラッグ v3 - グローバル版
+// isMobile判定に関係なく必ず実行
+// ========================================
+(function() {
+    'use strict';
+
+    // iPhoneなどタッチデバイスのみ実行
+    if (!('ontouchstart' in window)) return;
+
+    let activeDragPanel = null;
+    let dragOffsetX = 0, dragOffsetY = 0;
+
+    document.addEventListener('touchmove', (e) => {
+        if (!activeDragPanel) return;
+        const t = e.touches[0];
+        const newLeft = t.clientX - dragOffsetX;
+        const newTop  = t.clientY - dragOffsetY;
+        const maxLeft = window.innerWidth  - activeDragPanel.offsetWidth;
+        const maxTop  = window.innerHeight - 50;
+        activeDragPanel.style.left = Math.max(0, Math.min(newLeft, maxLeft)) + 'px';
+        activeDragPanel.style.top  = Math.max(0, Math.min(newTop,  maxTop )) + 'px';
+        e.preventDefault();
+    }, { passive: false });
+
+    document.addEventListener('touchend', () => { activeDragPanel = null; });
+    document.addEventListener('touchcancel', () => { activeDragPanel = null; });
+
+    function setupTouchDrag(panel) {
+        if (panel.dataset.touchDragV3) return;
+        panel.dataset.touchDragV3 = '1';
+
+        panel.addEventListener('touchstart', (e) => {
+            const panelRect = panel.getBoundingClientRect();
+            const t = e.touches[0];
+            // パネル上部50px以内のタッチのみドラッグ
+            if (t.clientY - panelRect.top > 50) return;
+            // ボタン・入力はドラッグしない
+            const tag = e.target.tagName;
+            if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'LABEL') return;
+
+            // fixedに変換（absolute/relative対応）
+            const cs = window.getComputedStyle(panel);
+            if (cs.position !== 'fixed') {
+                panel.style.position = 'fixed';
+                panel.style.left   = panelRect.left + 'px';
+                panel.style.top    = panelRect.top  + 'px';
+                panel.style.right  = 'auto';
+                panel.style.bottom = 'auto';
+            }
+
+            dragOffsetX = t.clientX - panel.offsetLeft;
+            dragOffsetY = t.clientY - panel.offsetTop;
+            activeDragPanel = panel;
+            e.preventDefault();
+        }, { passive: false });
+    }
+
+    function applyAll() {
+        document.querySelectorAll('div[id], section[id]').forEach(el => {
+            if (el.dataset.touchDragV3) return;
+            // 除外リスト
+            const excludeIds = ['bbs-flow-container', 'claude-agent-glow-border',
+                                'physics-toggle-container', 'panel-control-buttons'];
+            if (excludeIds.includes(el.id)) return;
+
+            const cs = window.getComputedStyle(el);
+            if (cs.position !== 'fixed' && cs.position !== 'absolute') return;
+            if (cs.display === 'none') return;
+
+            const rect = el.getBoundingClientRect();
+            if (rect.width < 80 || rect.height < 40) return;
+
+            setupTouchDrag(el);
+        });
+        console.log('📱 タッチドラッグv3 適用完了: ' +
+            document.querySelectorAll('[data-touch-drag-v3]').length + '個');
+    }
+
+    // 複数タイミングで確実に適用
+    [2000, 5000, 10000, 20000].forEach(t => setTimeout(applyAll, t));
+
+    // グローバル公開
+    window.applyTouchDragV3 = applyAll;
+
+    console.log('📱 汎用タッチドラッグ v3（グローバル版）初期化完了');
+})();
